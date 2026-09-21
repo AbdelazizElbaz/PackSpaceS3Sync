@@ -1,0 +1,23 @@
+# PackSpace S3 Sync sur Synology (Container Manager → Projet → coller ce
+# fichier) ou tout hôte Docker. Voir README, section « Synology / Docker ».
+services:
+  packspace-s3-sync:
+    image: ghcr.io/abdelazizelbaz/packspace-s3-sync:latest
+    # Ou, pour construire localement depuis le dépôt :  build: .
+    container_name: packspace-s3-sync
+    # Nom du poste tel qu'il apparaîtra dans Packspace → Synchro impression
+    hostname: NAS-ATELIER
+    restart: unless-stopped
+    ports:
+      - "47831:47831"          # interface web + API de contrôle
+    environment:
+      CONTROL_TOKEN: "changez-moi-par-un-long-secret"   # demandé par la page web
+      AGENT_HOSTNAME: "NAS-ATELIER"
+      TZ: "Africa/Casablanca"
+      # PUID/PGID : voir `user:` ci-dessous pour écrire avec un compte DSM précis
+    volumes:
+      - /volume1/docker/packspace-s3-sync:/data   # config, manifestes, journal
+      - /volume1/Impression:/sync                 # dossiers de destination (chemins /sync/… dans l'agent)
+    # Écrire les fichiers avec l'utilisateur DSM propriétaire du dossier partagé
+    # (id: `id nom_utilisateur` en SSH) plutôt qu'en root :
+    # user: "1026:100"

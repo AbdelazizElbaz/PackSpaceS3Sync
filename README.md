@@ -139,6 +139,47 @@ Points d'attention :
   si la fenêtre affiche « actif, injoignable », désinstaller puis réinstaller
   resynchronise les deux configs.
 
+## Synology / Docker (NAS)
+
+Même moteur que le mode service, livré en **image conteneur** (Node pur,
+sans Electron) : `ghcr.io/abdelazizelbaz/packspace-s3-sync` (construite et
+publiée par le workflow de release, amd64 + arm64). L'interface de la
+fenêtre est servie en **page web** par le conteneur (port 47831) : connexion,
+explorateur S3, instances, avancement, réglages — tout se pilote depuis le
+navigateur ou depuis le B2B Packspace comme pour n'importe quel poste.
+
+Installation sur Synology (DSM 7, paquet **Container Manager**) :
+
+1. File Station : créer `docker/packspace-s3-sync` (config, manifestes,
+   journal) et repérer le dossier partagé de destination (ex. `Impression`).
+2. Container Manager → **Projet** → Créer → coller `docker-compose.yml` du
+   dépôt, adapter :
+   - `CONTROL_TOKEN` : un long secret (demandé une fois par la page web) ;
+   - `hostname` / `AGENT_HOSTNAME` : nom du poste affiché dans Packspace ;
+   - volumes : `/volume1/docker/packspace-s3-sync:/data` et
+     `/volume1/Impression:/sync` ;
+   - `user: "uid:gid"` du compte DSM propriétaire du dossier (sinon les
+     fichiers sont écrits par root).
+3. Démarrer, puis ouvrir `http://<ip-du-nas>:47831/` → saisir le jeton →
+   se connecter avec un compte administrateur/opérateur → choisir les
+   dossiers S3 à synchroniser. Le **dossier de destination se tape au
+   clavier, tel que vu dans le conteneur** : `/sync/atelier-1` correspond à
+   `/volume1/Impression/atelier-1` sur le NAS.
+4. Le poste apparaît dans Packspace → Synchro impression avec le badge
+   « conteneur » côté agent ; redémarrages, mises à jour (`docker compose
+   pull && up -d`) et reprise des téléchargements sont automatiques.
+
+Variables d'environnement du conteneur : `CONTROL_TOKEN` (obligatoire),
+`CONTROL_PORT` (47831), `CONTROL_BIND` (0.0.0.0), `SERVE_UI` (1),
+`AGENT_HOSTNAME`, `PACKSPACE_SYNC_DATA_DIR` (/data), `TZ`. Journal :
+`docker logs packspace-s3-sync` ou `/data/logs/service.log`. Sans Synology :
+`docker compose up -d` fonctionne sur n'importe quel hôte Docker ; pour
+construire l'image localement : `docker build -t packspace-s3-sync .`.
+
+Sécurité : le port 47831 ne doit être accessible que sur le réseau local
+(pare-feu DSM) ; toute action exige le jeton, mais l'interface statique est
+publique.
+
 ## Réglages (bouton « Réglages »)
 
 | Réglage | Défaut | Rôle |

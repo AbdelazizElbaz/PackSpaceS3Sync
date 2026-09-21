@@ -4,7 +4,9 @@ const store = require("./store")
 
 // Identité du poste envoyée à API2 sur chaque appel "agent" (en-têtes
 // X-Agent-Id + X-Agent-Host, voir DesktopSyncController::agentFor).
-const HOSTNAME = os.hostname()
+// AGENT_HOSTNAME : nom du poste affiché dans le B2B (utile en conteneur, où
+// os.hostname() renvoie un identifiant Docker).
+const HOSTNAME = (process.env.AGENT_HOSTNAME || "").trim() || os.hostname()
 
 // Identifiant MACHINE stable (UUID généré une fois et persisté dans la
 // config) : c'est lui, pas le compte connecté, qui identifie le poste côté
@@ -69,8 +71,12 @@ function normalizeServerUrl(input) {
 async function ping(serverUrl) {
   const base = normalizeServerUrl(serverUrl)
   const res = await axios.get(`${base}/ping`, { headers: { Accept: "application/json" }, timeout: 10000 })
-  if (!res.data?.ok) throw new Error("Réponse inattendue : ce n'est pas une API Packspace.")
-  return { ...res.data, serverUrl: base }
+  const data = res.data || {}
+  // Ancien healthcheck d'API2 : {"message":"API OK"} sans `ok` ni
+  // `desktop_api` → API Packspace reconnue, mais version à vérifier.
+  const legacy = !data.ok && /API OK/i.test(String(data.message || ""))
+  if (!data.ok && !legacy) throw new Error("Réponse inattendue : ce n'est pas une API Packspace.")
+  return { ok: true, desktop_api: 0, ...data, serverUrl: base, legacy }
 }
 
 async function login(serverUrl, logon, password) {

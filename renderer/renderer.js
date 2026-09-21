@@ -251,7 +251,7 @@ function renderServiceBanner(message) {
 
 async function refreshConfig() {
   const c = await window.agent.getConfig()
-  $("modeBadge").classList.toggle("hidden", c.mode !== "service")
+  $("modeBadge").classList.toggle("hidden", !["service", "web"].includes(c.mode))
   renderServiceBanner(c.serviceUnreachable)
   if (c.isLoggedIn) {
     $("loginView").classList.add("hidden")
@@ -355,7 +355,14 @@ $("instSaveBtn").addEventListener("click", async () => {
 
 // ---------- réglages ----------
 
-$("settingsBtn").addEventListener("click", () => $("settingsDialog").classList.remove("hidden"))
+$("settingsBtn").addEventListener("click", async () => {
+  // Recharge la config avant d'ouvrir : sinon le formulaire affiche encore
+  // les valeurs de l'ouverture de l'app, même si elles ont été modifiées
+  // depuis (par cet agent ou depuis le B2B) — le dialogue n'étant jamais
+  // rafraîchi tout seul entre deux ouvertures.
+  await refreshConfig().catch(() => {})
+  $("settingsDialog").classList.remove("hidden")
+})
 $("settingsCloseBtn").addEventListener("click", () => $("settingsDialog").classList.add("hidden"))
 $("saveSettingsBtn").addEventListener("click", async () => {
   const partial = {}

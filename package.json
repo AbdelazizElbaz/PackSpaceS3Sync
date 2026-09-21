@@ -12,12 +12,13 @@
   "private": true,
   "scripts": {
     "start": "electron .",
-    "check": "node --check src/main.js && node --check src/preload.js && node --check src/store.js && node --check src/api.js && node --check src/engine.js && node --check src/syncManager.js && node --check src/service.js && node --check src/controlServer.js && node --check src/controlClient.js && node --check src/serviceInstaller.js && node --check src/uninstallHook.js && node --check src/workers/downloadWorker.js && node --check renderer/renderer.js",
+    "check": "node --check src/main.js && node --check src/preload.js && node --check src/store.js && node --check src/api.js && node --check src/engine.js && node --check src/syncManager.js && node --check src/service.js && node --check src/controlServer.js && node --check src/controlClient.js && node --check src/serviceInstaller.js && node --check src/uninstallHook.js && node --check src/workers/downloadWorker.js && node --check renderer/renderer.js && node --check renderer/web-agent.js",
     "dist": "electron-builder --publish never",
     "dist:win": "electron-builder --win --publish never",
     "dist:mac": "electron-builder --mac --publish never",
     "dist:linux": "electron-builder --linux --publish never",
-    "service:dev": "node src/service.js"
+    "service:dev": "node src/service.js",
+    "docker:build": "docker build -t packspace-s3-sync ."
   },
   "dependencies": {
     "auto-launch": "^5.0.6",

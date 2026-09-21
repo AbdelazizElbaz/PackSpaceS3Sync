@@ -64,6 +64,12 @@ process.on("unhandledRejection", (err) => log("error", `unhandledRejection: ${er
 
 async function main() {
   fs.mkdirSync(store.dataDir, { recursive: true })
+  // Variables d'environnement du mode CONTENEUR (Docker / Synology, voir
+  // Dockerfile) : CONTROL_TOKEN impose le jeton (sinon celui de la config),
+  // CONTROL_BIND=0.0.0.0 expose l'API/l'interface web hors du conteneur,
+  // SERVE_UI=1 sert l'interface de la fenêtre en pages web.
+  if (process.env.CONTROL_TOKEN) store.set("controlToken", process.env.CONTROL_TOKEN.trim())
+  if (process.env.CONTROL_PORT) store.set("controlPort", Number(process.env.CONTROL_PORT) || 47831)
   if (!store.get("controlToken")) {
     // Normalement posé par l'installateur (partagé avec la config GUI) ;
     // sinon on en génère un, à recopier dans la config de la fenêtre.
@@ -77,12 +83,21 @@ async function main() {
     })`
   )
 
+  const bind = process.env.CONTROL_BIND || "127.0.0.1"
+  const serveUi = ["1", "true", "yes"].includes(String(process.env.SERVE_UI || "").toLowerCase())
+  if (bind !== "127.0.0.1" && !process.env.CONTROL_TOKEN) {
+    log("warn", `API exposée sur ${bind} avec le jeton de la config : ${store.get("controlToken")} (définissez CONTROL_TOKEN)`)
+  }
+
   const engine = new Engine({ log })
   const server = await startControlServer(engine, {
     port: Number(store.get("controlPort")) || 47831,
     token: store.get("controlToken"),
     version: api.APP_VERSION,
     hostname: api.HOSTNAME,
+    bind,
+    serveUi,
+    uiDir: path.join(__dirname, "..", "renderer"),
     log,
   })
   engine.start()
