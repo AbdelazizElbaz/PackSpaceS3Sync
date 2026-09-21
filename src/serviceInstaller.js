@@ -168,7 +168,11 @@ function runElevated(script) {
   fs.writeFileSync(file, script, { mode: 0o700 })
   let cmd
   let args
-  if (process.platform === "darwin") {
+  if (typeof process.getuid === "function" && process.getuid() === 0) {
+    // Déjà root (prerm du .deb, LaunchDaemon…) : pas d'élévation à demander.
+    cmd = "sh"
+    args = [file]
+  } else if (process.platform === "darwin") {
     cmd = "osascript"
     args = ["-e", `do shell script "sh ${file.replace(/"/g, '\\"')}" with administrator privileges`]
   } else {

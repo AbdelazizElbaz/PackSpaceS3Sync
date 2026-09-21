@@ -1,0 +1,12 @@
+#!/bin/sh
+# prerm du paquet .deb (electron-builder deb.fpm --before-remove) : prévient
+# l'API Packspace que ce poste est désinstallé et retire l'unité systemd du
+# mode service — voir src/uninstallHook.js. Ne bloque jamais la
+# désinstallation.
+APP_DIR="/opt/PackSpace S3 Sync"
+BIN="$APP_DIR/packspace-s3-sync"
+HOOK="$APP_DIR/resources/app/src/uninstallHook.js"
+if [ -x "$BIN" ] && [ -f "$HOOK" ]; then
+  ELECTRON_RUN_AS_NODE=1 "$BIN" "$HOOK" || true
+fi
+exit 0

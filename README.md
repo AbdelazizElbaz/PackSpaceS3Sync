@@ -222,6 +222,17 @@ Windows (OV/EV) et Apple Developer ID + notarization, à brancher via les
 variables `CSC_LINK` / `CSC_KEY_PASSWORD` / `APPLE_ID` d'electron-builder
 dans le workflow.
 
+## Désinstallation
+
+Le désinstalleur (Windows : « Désinstaller » dans Applications ; Linux :
+`sudo apt remove packspace-s3-sync`) lance `src/uninstallHook.js` avant de
+supprimer les fichiers : le poste est **marqué « Désinstallé »** dans le B2B
+(date, notification admin, jeton révoqué), le service est retiré s'il était
+installé. Les dossiers de données sont conservés (une réinstallation
+retrouve le même poste). macOS n'a pas de désinstalleur : lancer le hook à
+la main avant de jeter l'app —
+`ELECTRON_RUN_AS_NODE=1 "/Applications/PackSpace S3 Sync.app/Contents/MacOS/PackSpace S3 Sync" "/Applications/PackSpace S3 Sync.app/Contents/Resources/app/src/uninstallHook.js"`.
+
 ## Config locale
 
 Fichier JSON `packspace-s3-sync-config.json` (lib `conf`) : adresse API,

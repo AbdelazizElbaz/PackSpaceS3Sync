@@ -12,7 +12,7 @@
   "private": true,
   "scripts": {
     "start": "electron .",
-    "check": "node --check src/main.js && node --check src/preload.js && node --check src/store.js && node --check src/api.js && node --check src/engine.js && node --check src/syncManager.js && node --check src/service.js && node --check src/controlServer.js && node --check src/controlClient.js && node --check src/serviceInstaller.js && node --check src/workers/downloadWorker.js && node --check renderer/renderer.js",
+    "check": "node --check src/main.js && node --check src/preload.js && node --check src/store.js && node --check src/api.js && node --check src/engine.js && node --check src/syncManager.js && node --check src/service.js && node --check src/controlServer.js && node --check src/controlClient.js && node --check src/serviceInstaller.js && node --check src/uninstallHook.js && node --check src/workers/downloadWorker.js && node --check renderer/renderer.js",
     "dist": "electron-builder --publish never",
     "dist:win": "electron-builder --win --publish never",
     "dist:mac": "electron-builder --mac --publish never",
@@ -37,8 +37,7 @@
     "files": [
       "src/**/*",
       "renderer/**/*",
-      "build/**/*",
-      "!**/*.map"
+      "build/icon.png"
     ],
     "win": {
       "target": [
@@ -55,7 +54,8 @@
     "nsis": {
       "oneClick": false,
       "allowToChangeInstallationDirectory": true,
-      "createDesktopShortcut": true
+      "createDesktopShortcut": true,
+      "include": "build/installer.nsh"
     },
     "mac": {
       "target": [
@@ -100,7 +100,12 @@
     },
     "artifactName": "PackSpace-S3-Sync-${version}-${os}-${arch}.${ext}",
     "publish": null,
-    "asar": false
+    "asar": false,
+    "deb": {
+      "fpm": [
+        "--before-remove=build/deb/prerm"
+      ]
+    }
   },
   "optionalDependencies": {
     "node-windows": "1.0.0-beta.8"
