@@ -1,0 +1,153 @@
+# Packaging multi-OS de PackSpace S3 Sync + publication sur S3 pour que
+# l'app B2B Packspace propose le téléchargement (voir API2
+# DesktopSyncController::releases et la carte "Installer l'agent" de
+# /sync-agents).
+#
+# Déclencheurs :
+#   - tag `vX.Y.Z` poussé (git tag v1.0.0 && git push --tags) → version = tag
+#   - workflow_dispatch → version = champ saisi (ex 1.0.1)
+#
+# Secrets / variables à définir dans CE dépôt (Settings → Secrets and
+# variables → Actions), mêmes valeurs que le monorepo Packspace :
+#   secrets.AWS_ACCESS_KEY_ID, secrets.AWS_SECRET_ACCESS_KEY
+#   vars.AWS_REGION, vars.AWS_BUCKET  (bucket principal API2)
+#
+# Arborescence produite dans le bucket :
+#   desktop-agent/releases/<version>/PackSpace-S3-Sync-<version>-win-x64.exe
+#   desktop-agent/releases/<version>/PackSpace-S3-Sync-<version>-mac-arm64.dmg
+#   desktop-agent/releases/<version>/PackSpace-S3-Sync-<version>-mac-x64.dmg
+#   desktop-agent/releases/<version>/PackSpace-S3-Sync-<version>-linux-x86_64.AppImage
+#   desktop-agent/releases/<version>/PackSpace-S3-Sync-<version>-linux-amd64.deb
+#   desktop-agent/latest.json   ← lu par API2 (version + liste des fichiers)
+#
+# Pas de signature de code ici : Windows affichera l'avertissement SmartScreen
+# ("éditeur inconnu" → "Informations complémentaires" → "Exécuter quand même")
+# et macOS demandera clic droit → Ouvrir la première fois. Pour supprimer ces
+# avertissements il faut un certificat de signature (Windows EV/OV, Apple
+# Developer ID + notarization) — à ajouter plus tard via les variables
+# CSC_LINK / CSC_KEY_PASSWORD / APPLE_ID d'electron-builder.
+
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version (ex 1.0.1) — écrite dans package.json avant le build"
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            script: dist:win
+            glob: release/*.exe
+          - os: macos-latest
+            script: dist:mac
+            glob: release/*.dmg
+          - os: ubuntu-latest
+            script: dist:linux
+            glob: |
+              release/*.AppImage
+              release/*.deb
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Resolve version
+        id: v
+        shell: bash
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            V="${{ github.event.inputs.version }}"
+          else
+            V="${GITHUB_REF_NAME#v}"
+          fi
+          echo "version=$V" >> "$GITHUB_OUTPUT"
+          npm version "$V" --no-git-tag-version --allow-same-version
+
+      - run: npm ci
+
+      - name: Build installer
+        run: npm run ${{ matrix.script }}
+        env:
+          # Ne tente pas de publier sur GitHub Releases : on pousse sur S3.
+          EP_DRAFT: "false"
+          CSC_IDENTITY_AUTO_DISCOVERY: "false"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: installer-${{ matrix.os }}
+          path: ${{ matrix.glob }}
+          if-no-files-found: error
+
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ vars.AWS_REGION }}
+
+      - name: Upload to S3 + write latest.json
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            V="${{ github.event.inputs.version }}"
+          else
+            V="${GITHUB_REF_NAME#v}"
+          fi
+          BUCKET="${{ vars.AWS_BUCKET }}"
+          PREFIX="desktop-agent/releases/$V"
+          ls -la dist
+
+          # Manifeste consommé par API2 : un objet par plateforme/arch.
+          python3 - "$V" "$PREFIX" <<'EOF'
+          import json, os, sys, datetime
+          version, prefix = sys.argv[1], sys.argv[2]
+          assets = []
+          for name in sorted(os.listdir("dist")):
+              p = os.path.join("dist", name)
+              if not os.path.isfile(p): continue
+              lower = name.lower()
+              if lower.endswith(".exe"): os_, arch, kind = "win", "x64", "installer"
+              elif lower.endswith(".dmg"): os_, arch, kind = "mac", ("arm64" if "arm64" in lower else "x64"), "installer"
+              elif lower.endswith(".appimage"): os_, arch, kind = "linux", "x86_64", "appimage"
+              elif lower.endswith(".deb"): os_, arch, kind = "linux", "amd64", "deb"
+              else: continue
+              assets.append({"os": os_, "arch": arch, "kind": kind, "name": name,
+                             "key": f"{prefix}/{name}", "size": os.path.getsize(p)})
+          json.dump({"version": version,
+                     "published_at": datetime.datetime.utcnow().isoformat() + "Z",
+                     "assets": assets}, open("latest.json", "w"), indent=2)
+          print(open("latest.json").read())
+          EOF
+
+          aws s3 cp dist "s3://$BUCKET/$PREFIX/" --recursive --exclude "*" \
+            --include "*.exe" --include "*.dmg" --include "*.AppImage" --include "*.deb"
+          aws s3 cp latest.json "s3://$BUCKET/desktop-agent/latest.json" \
+            --content-type application/json --cache-control "no-cache"
+          aws s3 cp latest.json "s3://$BUCKET/desktop-agent/releases/$V/manifest.json" \
+            --content-type application/json

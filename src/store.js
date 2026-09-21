@@ -38,6 +38,11 @@ const store = new Store({
     // (voir syncManager.js) + manifestes { instanceId: { s3Key: {size, etag, at} } }
     instances: [],
     manifests: {},
+    // Pilotage serveur (DesktopSyncController) : id du poste côté API2,
+    // libellé choisi dans le B2B, et cache des réglages serveur.
+    agentId: null,
+    agentLabel: "",
+    serverSettings: {},
   },
 })
 

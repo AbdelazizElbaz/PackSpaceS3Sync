@@ -170,7 +170,9 @@ function renderFiles(state) {
   $("summary").textContent = items.length
     ? `${active.length}/${state.maxParallelFiles} threads actifs · ${items.filter((i) => i.status === "queued").length} en attente · ${fmtSpeed(totalSpeed)}`
     : ""
-  $("globalStatus").textContent = state.paused
+  $("globalStatus").textContent = state.serverError
+    ? `⚠ ${state.serverError}`
+    : state.paused
     ? "⏸ en pause"
     : state.scanning
     ? "⟳ vérification…"
@@ -229,7 +231,7 @@ async function refreshConfig() {
   if (c.isLoggedIn) {
     $("loginView").classList.add("hidden")
     $("mainView").classList.remove("hidden")
-    $("userLabel").textContent = c.userLabel || ""
+    $("userLabel").textContent = `${c.userLabel || ""} · ${c.agentLabel || c.hostname || ""}`
     $("autoLaunchToggle").checked = !!c.autoLaunch
     for (const k of SETTINGS) $(k).value = c[k]
     $("pollIntervalSec").value = Math.round((c.pollIntervalMs || 5000) / 1000)
@@ -317,8 +319,12 @@ $("instSaveBtn").addEventListener("click", async () => {
     $("instError").textContent = "Ce dossier S3 est déjà synchronisé par une autre instance."
     return
   }
-  await window.agent.addInstance({ name, prefix, localDir })
-  $("instanceDialog").classList.add("hidden")
+  try {
+    await window.agent.addInstance({ name, prefix, localDir })
+    $("instanceDialog").classList.add("hidden")
+  } catch (e) {
+    $("instError").textContent = e?.message || "Impossible de créer l'instance."
+  }
 })
 
 // ---------- réglages ----------
@@ -329,8 +335,12 @@ $("saveSettingsBtn").addEventListener("click", async () => {
   const partial = {}
   for (const k of SETTINGS) partial[k] = Number($(k).value)
   partial.pollIntervalMs = Number($("pollIntervalSec").value) * 1000
-  await window.agent.setSettings(partial)
-  $("settingsDialog").classList.add("hidden")
+  try {
+    await window.agent.setSettings(partial)
+    $("settingsDialog").classList.add("hidden")
+  } catch (e) {
+    alert(e?.message || "Impossible d'enregistrer les réglages.")
+  }
 })
 $("autoLaunchToggle").addEventListener("change", (e) => window.agent.setAutoLaunch(e.target.checked))
 

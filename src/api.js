@@ -168,9 +168,24 @@ async function heartbeat(status) {
   return res.data
 }
 
+// Déclare la fin de session (tray "Quitter") — best effort, timeout court.
+async function agentOffline() {
+  try {
+    await client().post("/desktop/agent/offline", {}, { timeout: 4000 })
+  } catch {
+    // ignore
+  }
+}
+
 async function pushEvents(events) {
   if (!events.length) return { stored: 0 }
   const res = await client().post("/desktop/agent/events", { events })
+  return res.data
+}
+
+// Réglages de parallélisme → serveur (même endpoint que le B2B).
+async function updateAgentSettings(agentId, settings) {
+  const res = await client().patch(`/desktop/sync/agents/${agentId}`, { settings })
   return res.data
 }
 
@@ -212,6 +227,8 @@ module.exports = {
   fetchAgentConfig,
   heartbeat,
   pushEvents,
+  agentOffline,
+  updateAgentSettings,
   createInstance,
   updateInstance,
   deleteInstance,

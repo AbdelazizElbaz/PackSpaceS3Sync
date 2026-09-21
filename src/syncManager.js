@@ -1,76 +1,148 @@
 const path = require("path")
-const fs = require("fs")
 const { Worker } = require("worker_threads")
 const store = require("./store")
-const { listAllObjects, presignDownload } = require("./api")
+const api = require("./api")
 
-// Orchestrateur des INSTANCES DE SYNCHRONISATION.
+// Orchestrateur des INSTANCES DE SYNCHRONISATION, piloté par API2.
 //
-// Une instance = un dossier S3 sous PrintProd (préfixe) → un dossier local.
-// À chaque cycle, chaque instance active liste récursivement son préfixe
-// (GET /desktop/s3/objects via API2) et compare avec son manifeste local
-// (clé → {size, etag}). Tout objet nouveau ou modifié (etag/size différent)
-// est mis en file et dispatché vers un pool de N worker threads
-// (workers/downloadWorker.js, un fichier par thread) qui télécharge en
-// direct depuis S3 (URL présignée par API2), en morceaux parallèles avec
-// reprise. Une fois le fichier écrit sur disque (rename final), la clé est
-// inscrite dans le manifeste → elle n'est plus re-téléchargée.
+// Une instance = un dossier S3 sous PrintProd/PrintWorkSpace (préfixe) →
+// un dossier local. La liste des instances ET les réglages de parallélisme
+// vivent côté serveur (DesktopSyncController) : ils sont modifiables aussi
+// bien depuis cet agent que depuis l'app B2B, et l'agent les recharge à
+// chaque cycle (config_version). Ce qui reste local : les MANIFESTES (clé
+// S3 → {size, etag} déjà synchronisés), le jeton, et un cache de la
+// dernière config connue pour continuer à tourner si API2 est injoignable.
 //
-// Les manifestes sont persistés (electron-store) : au redémarrage on ne
-// re-télécharge pas tout ; un fichier présent localement avec la bonne
-// taille est aussi reconnu par le worker ("déjà complet").
+// Cycle (toutes les pollIntervalMs) :
+//   1. heartbeat → instantané d'avancement au serveur + commandes en retour
+//      (pause/resume/scan/retry/reset envoyées depuis le B2B)
+//   2. si config_version a changé → recharge réglages + instances
+//   3. scan de chaque instance active : listing récursif S3 vs manifeste →
+//      nouveaux/modifiés en file
+//   4. dispatch vers le pool de worker threads (un fichier par thread)
+//   5. événements (fichier synchronisé / échec / erreur de scan) poussés
+//      au serveur par lots → historique + notifications in-app du B2B.
 
 const WORKER_PATH = path.join(__dirname, "workers", "downloadWorker.js")
 
 class SyncManager {
   constructor(onUpdate) {
     this.onUpdate = onUpdate || (() => {})
-    this.items = new Map() // jobKey (instanceId + "|" + s3Key) -> item
+    this.items = new Map() // jobKey (instanceId|s3Key) -> item
     this.workers = new Map() // jobKey -> Worker
-    this.instanceStats = new Map() // instanceId -> { lastScanAt, lastError, total, synced, pending }
+    this.instanceStats = new Map() // instanceId -> { lastScanAt, lastError, total, synced }
     this.polling = false
     this.paused = false
     this.pollTimer = null
     this.wakeTimer = null
     this.scanning = false
+    this.registered = false
+    this.serverError = null
+    this.configVersion = 0
+    this.eventQueue = []
   }
 
-  // ---------- instances (persistées) ----------
+  // ---------- config serveur (avec cache local) ----------
+
+  settings() {
+    return store.get("serverSettings") || {}
+  }
+
+  setting(key, fallback) {
+    const v = Number(this.settings()[key] ?? store.get(key))
+    return Number.isFinite(v) && v > 0 ? v : fallback
+  }
 
   instances() {
     return store.get("instances") || []
   }
 
-  saveInstances(list) {
+  applyConfig(cfg) {
+    if (!cfg) return
+    store.set("agentId", cfg.agent_id)
+    store.set("agentLabel", cfg.label || "")
+    store.set("serverSettings", cfg.settings || {})
+    // Normalise vers le format interne (localDir, enabled, id serveur).
+    const list = (cfg.instances || []).map((i) => ({
+      id: i.id,
+      name: i.name,
+      prefix: String(i.prefix || "").replace(/^\/+|\/+$/g, ""),
+      localDir: i.localDir,
+      enabled: i.enabled !== false,
+    }))
+    const known = new Set(list.map((i) => i.id))
+    // Instances supprimées côté serveur : on abandonne leurs jobs en cours.
+    for (const [k, item] of this.items) {
+      if (!known.has(item.instanceId)) {
+        this.terminateWorker(k)
+        this.items.delete(k)
+      }
+    }
     store.set("instances", list)
+    this.configVersion = Number(cfg.config_version || 0)
+    this.emit()
   }
 
-  addInstance({ name, prefix, localDir }) {
-    const list = this.instances()
-    const id = `i${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`
-    list.push({
-      id,
+  // Premier contact après connexion (ou au démarrage) : enregistre le poste
+  // et récupère la config. Les instances locales pré-existantes (ancienne
+  // version de l'agent, sans serveur) sont importées si le poste est
+  // nouveau côté serveur.
+  async register() {
+    if (!store.get("serverUrl") || !store.get("token")) return false
+    try {
+      const localInstances = this.instances().map((i) => ({
+        name: i.name,
+        prefix: i.prefix,
+        localDir: i.localDir,
+        enabled: i.enabled !== false,
+      }))
+      const cfg = await api.registerAgent(localInstances, this.settings())
+      this.applyConfig(cfg)
+      this.registered = true
+      this.serverError = null
+      return true
+    } catch (err) {
+      this.registered = false
+      this.serverError = describe(err)
+      this.emit()
+      return false
+    }
+  }
+
+  async refreshConfig() {
+    try {
+      const cfg = await api.fetchAgentConfig()
+      this.applyConfig(cfg)
+      this.serverError = null
+    } catch (err) {
+      this.serverError = describe(err)
+      if (err?.response?.status === 404) this.registered = false
+    }
+  }
+
+  // ---------- instances (écritures → serveur, puis rechargement) ----------
+
+  async addInstance({ name, prefix, localDir }) {
+    const agentId = store.get("agentId")
+    if (!agentId) throw new Error("Agent non enregistré auprès du serveur.")
+    await api.createInstance(agentId, {
       name: name || path.basename(prefix),
       prefix: String(prefix).replace(/^\/+|\/+$/g, ""),
       localDir,
       enabled: true,
-      createdAt: Date.now(),
     })
-    this.saveInstances(list)
-    this.emit()
-    this.scanNow()
-    return id
-  }
-
-  updateInstance(id, patch) {
-    const list = this.instances().map((i) => (i.id === id ? { ...i, ...patch, id } : i))
-    this.saveInstances(list)
-    this.emit()
+    await this.refreshConfig()
     this.scanNow()
   }
 
-  removeInstance(id) {
-    this.saveInstances(this.instances().filter((i) => i.id !== id))
+  async updateInstance(id, patch) {
+    await api.updateInstance(id, patch)
+    await this.refreshConfig()
+    this.scanNow()
+  }
+
+  async removeInstance(id) {
+    await api.deleteInstance(id)
     for (const [k, item] of this.items) {
       if (item.instanceId === id) {
         this.terminateWorker(k)
@@ -81,7 +153,7 @@ class SyncManager {
     delete manifests[id]
     store.set("manifests", manifests)
     this.instanceStats.delete(id)
-    this.emit()
+    await this.refreshConfig()
   }
 
   manifest(instanceId) {
@@ -96,9 +168,6 @@ class SyncManager {
     store.set("manifests", all)
   }
 
-  // Force une re-vérification complète d'une instance (oublie le manifeste).
-  // Les fichiers déjà présents localement à la bonne taille ne seront pas
-  // re-téléchargés (détection "déjà complet" dans le worker).
   resetInstance(id) {
     const all = store.get("manifests") || {}
     delete all[id]
@@ -106,7 +175,7 @@ class SyncManager {
     this.scanNow()
   }
 
-  // ---------- état exposé au renderer ----------
+  // ---------- état ----------
 
   state() {
     const items = Array.from(this.items.values()).map((i) => ({
@@ -136,11 +205,17 @@ class SyncManager {
         failed: own.filter((i) => i.status === "failed").length,
       }
     })
+    const active = items.filter((i) => i.status === "downloading")
     return {
       paused: this.paused,
       scanning: this.scanning,
+      registered: this.registered,
+      serverError: this.serverError,
+      agentLabel: store.get("agentLabel") || "",
+      hostname: api.HOSTNAME,
       activeWorkers: this.workers.size,
-      maxParallelFiles: store.get("maxParallelFiles"),
+      totalSpeed: active.reduce((s, i) => s + (i.speed || 0), 0),
+      maxParallelFiles: this.setting("maxParallelFiles", 4),
       instances,
       items,
     }
@@ -194,30 +269,79 @@ class SyncManager {
     this.pollLoop()
   }
 
-  // ---------- scan des instances ----------
+  // ---------- commandes reçues du B2B ----------
+
+  runCommand(cmd) {
+    const instanceId = cmd?.instance_id ? Number(cmd.instance_id) : null
+    switch (cmd?.command) {
+      case "pause":
+        this.pause()
+        break
+      case "resume":
+        this.resume()
+        break
+      case "scan":
+        break // le scan suit juste après dans pollLoop
+      case "retry":
+        this.retryFailed(instanceId)
+        break
+      case "reset":
+        if (instanceId) this.resetInstance(instanceId)
+        break
+      default:
+        break
+    }
+  }
+
+  // ---------- boucle ----------
 
   async pollLoop() {
     if (!this.polling) return
     clearTimeout(this.pollTimer)
-    if (store.get("serverUrl") && store.get("token") && !this.paused && !this.scanning) {
-      this.scanning = true
-      this.emit()
-      for (const inst of this.instances()) {
-        if (!inst.enabled) continue
-        await this.scanInstance(inst)
+
+    if (store.get("serverUrl") && store.get("token")) {
+      if (!this.registered) await this.register()
+
+      if (this.registered) {
+        // 1. heartbeat + commandes
+        try {
+          const hb = await api.heartbeat(this.state())
+          this.serverError = null
+          for (const cmd of hb.commands || []) this.runCommand(cmd)
+          // 2. config modifiée (depuis le B2B ou un autre écran) ?
+          if (Number(hb.config_version || 0) !== this.configVersion) await this.refreshConfig()
+        } catch (err) {
+          this.serverError = describe(err)
+          if (err?.response?.status === 404) this.registered = false
+        }
+
+        // 3. scans
+        if (!this.paused && !this.scanning) {
+          this.scanning = true
+          this.emit()
+          for (const inst of this.instances()) {
+            if (!inst.enabled) continue
+            await this.scanInstance(inst)
+          }
+          this.scanning = false
+          this.emit()
+          this.dispatch()
+        }
+
+        // 5. événements en attente
+        await this.flushEvents()
       }
-      this.scanning = false
       this.emit()
-      this.dispatch()
     }
-    const interval = Math.max(1000, Number(store.get("pollIntervalMs")) || 5000)
+
+    const interval = Math.max(2000, this.setting("pollIntervalMs", 5000))
     this.pollTimer = setTimeout(() => this.pollLoop(), interval)
   }
 
   async scanInstance(inst) {
     const stats = this.instanceStats.get(inst.id) || {}
     try {
-      const objects = await listAllObjects(inst.prefix)
+      const objects = await api.listAllObjects(inst.prefix)
       const manifest = this.manifest(inst.id)
       let synced = 0
       for (const o of objects) {
@@ -229,8 +353,6 @@ class SyncManager {
         const jobKey = `${inst.id}|${o.key}`
         const existing = this.items.get(jobKey)
         if (existing) {
-          // Déjà en file/en cours. Si l'objet a changé entre-temps
-          // (nouvel etag) et n'est pas en cours, on rafraîchit ses métadonnées.
           if (existing.status === "queued" || existing.status === "failed") {
             existing.size = o.size
             existing.etag = o.etag
@@ -252,26 +374,19 @@ class SyncManager {
           attempts: 0,
           error: null,
           nextAttemptAt: 0,
+          startedAt: 0,
         })
       }
-      this.instanceStats.set(inst.id, {
-        ...stats,
-        lastScanAt: Date.now(),
-        lastError: null,
-        total: objects.length,
-        synced,
-      })
+      this.instanceStats.set(inst.id, { ...stats, lastScanAt: Date.now(), lastError: null, total: objects.length, synced })
     } catch (err) {
-      const status = err?.response?.status
-      this.instanceStats.set(inst.id, {
-        ...stats,
-        lastError:
-          status === 401
-            ? "Session expirée — reconnectez-vous."
-            : status === 403
-            ? "Accès refusé à ce dossier."
-            : err?.response?.data?.message || err?.message || "Erreur réseau",
-      })
+      const msg = describe(err)
+      const prev = stats.lastError
+      this.instanceStats.set(inst.id, { ...stats, lastError: msg })
+      // Une erreur de scan n'est remontée qu'une fois par changement de
+      // message (pas à chaque cycle de 5 s).
+      if (prev !== msg) {
+        this.queueEvent({ type: "scan_error", level: "error", instance_id: inst.id, message: msg })
+      }
     }
     this.emit()
   }
@@ -280,7 +395,7 @@ class SyncManager {
 
   dispatch() {
     if (this.paused) return
-    const max = Math.max(1, Number(store.get("maxParallelFiles")) || 1)
+    const max = Math.max(1, this.setting("maxParallelFiles", 4))
     const now = Date.now()
     const enabled = new Set(this.instances().filter((i) => i.enabled).map((i) => i.id))
     for (const item of this.items.values()) {
@@ -309,20 +424,22 @@ class SyncManager {
     item.error = null
     item.speed = 0
     item.attempts += 1
+    item.startedAt = item.startedAt || Date.now()
     this.emit()
 
-    // Slot réservé de façon synchrone avant l'await presign — sinon
-    // dispatch() pourrait lancer max+1 fichiers pendant l'attente.
     this.workers.set(item.jobKey, null)
 
     let url
     try {
-      url = await presignDownload(item.key)
+      url = await api.presignDownload(item.key)
     } catch (err) {
       this.workers.delete(item.jobKey)
-      this.fail(item, err?.response?.data?.message || err?.message || "Échec de la signature S3", true)
+      this.fail(item, describe(err, "Échec de la signature S3"), true)
       return
     }
+
+    const destPath = path.join(inst.localDir, ...item.relative.split("/").filter(Boolean).map(sanitize))
+    item.destPath = destPath
 
     const worker = new Worker(WORKER_PATH)
     this.workers.set(item.jobKey, worker)
@@ -351,12 +468,10 @@ class SyncManager {
       job: {
         id: item.jobKey,
         url,
-        // Arborescence S3 relative reproduite sous le dossier local, chaque
-        // segment assaini pour Windows/macOS/Linux.
-        destPath: path.join(inst.localDir, ...item.relative.split("/").filter(Boolean).map(sanitize)),
-        chunkSizeBytes: mb(store.get("chunkSizeMb"), 8),
-        chunkThresholdBytes: mb(store.get("chunkThresholdMb"), 16),
-        maxParallelChunks: Math.max(1, Number(store.get("maxParallelChunks")) || 4),
+        destPath,
+        chunkSizeBytes: this.setting("chunkSizeMb", 8) * 1024 * 1024,
+        chunkThresholdBytes: this.setting("chunkThresholdMb", 16) * 1024 * 1024,
+        maxParallelChunks: Math.max(1, this.setting("maxParallelChunks", 4)),
       },
     })
   }
@@ -369,6 +484,21 @@ class SyncManager {
     this.markSynced(item.instanceId, item.key, { size: item.size, etag: item.etag })
     const st = this.instanceStats.get(item.instanceId)
     if (st) st.synced = (st.synced || 0) + 1
+
+    // Historique + notification B2B ("fichier synchronisé"). order_id =
+    // avant-dernier segment du chemin PrintWorkSpace/<machine>/<date>/
+    // <type>/<client>/<commande>/<fichier> (voir buildPrintPath côté API2).
+    this.queueEvent({
+      type: "file_done",
+      level: "info",
+      instance_id: item.instanceId,
+      s3_key: item.key,
+      bytes: item.total,
+      duration_ms: item.startedAt ? Date.now() - item.startedAt : null,
+      message: `Synchronisé : ${item.relative}`,
+      meta: { local_path: item.destPath, order_id: orderIdFromKey(item.key), attempts: item.attempts },
+    })
+
     this.emit()
     setTimeout(() => {
       if (this.items.get(item.jobKey)?.status === "done") {
@@ -382,10 +512,8 @@ class SyncManager {
   fail(item, message, retryable, status = null) {
     this.terminateWorker(item.jobKey)
     item.speed = 0
-    const max = Math.max(0, Number(store.get("maxRetries")) || 0)
+    const max = Math.max(0, Number(this.settings().maxRetries ?? store.get("maxRetries") ?? 3))
     if (retryable && item.attempts <= max) {
-      // 403 = URL présignée expirée → nouvelle signature quasi immédiate,
-      // sinon backoff exponentiel 2s, 4s, 8s… plafonné à 60s.
       const delay = status === 403 ? 200 : Math.min(60000, 2000 * 2 ** (item.attempts - 1))
       item.status = "queued"
       item.error = `${message} — nouvelle tentative dans ${Math.round(delay / 1000)}s`
@@ -393,6 +521,15 @@ class SyncManager {
     } else {
       item.status = "failed"
       item.error = message
+      this.queueEvent({
+        type: "file_failed",
+        level: "error",
+        instance_id: item.instanceId,
+        s3_key: item.key,
+        bytes: item.total,
+        message,
+        meta: { attempts: item.attempts, http_status: status, order_id: orderIdFromKey(item.key) },
+      })
     }
     this.emit()
     this.dispatch()
@@ -410,11 +547,42 @@ class SyncManager {
       }
     }
   }
+
+  // ---------- événements → serveur ----------
+
+  queueEvent(e) {
+    this.eventQueue.push({ ...e, occurred_at: new Date().toISOString() })
+    // Un fichier synchronisé doit apparaître vite dans la cloche du B2B :
+    // on pousse sans attendre le prochain cycle (mais regroupé sur 1,5 s
+    // pour les rafales).
+    clearTimeout(this.flushTimer)
+    this.flushTimer = setTimeout(() => this.flushEvents(), 1500)
+  }
+
+  async flushEvents() {
+    if (!this.eventQueue.length || !this.registered) return
+    const batch = this.eventQueue.splice(0, 200)
+    try {
+      await api.pushEvents(batch)
+    } catch {
+      // Réessayé au prochain cycle (on remet en tête de file, borné).
+      this.eventQueue = batch.concat(this.eventQueue).slice(0, 1000)
+    }
+  }
 }
 
-function mb(value, fallback) {
-  const n = Number(value)
-  return (n > 0 ? n : fallback) * 1024 * 1024
+function describe(err, fallback = "Erreur réseau") {
+  const status = err?.response?.status
+  if (status === 401) return "Session expirée — reconnectez-vous."
+  if (status === 403) return err?.response?.data?.message || "Accès refusé."
+  if (status === 404) return err?.response?.data?.message || "Endpoint introuvable (API2 à jour ?)."
+  return err?.response?.data?.message || err?.message || fallback
+}
+
+function orderIdFromKey(key) {
+  const parts = String(key || "").split("/").filter(Boolean)
+  const seg = parts.length >= 2 ? parts[parts.length - 2] : ""
+  return /^\d+$/.test(seg) ? Number(seg) : null
 }
 
 function sanitize(segment) {

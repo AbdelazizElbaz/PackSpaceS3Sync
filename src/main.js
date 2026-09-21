@@ -2,7 +2,8 @@ const { app, BrowserWindow, Tray, Menu, ipcMain, nativeImage, dialog, shell } = 
 const path = require("path")
 const AutoLaunch = require("auto-launch")
 const store = require("./store")
-const { login, browse, ping } = require("./api")
+const api = require("./api")
+const { login, browse, ping } = api
 const SyncManager = require("./syncManager")
 
 // Une seule instance : un second lancement ré-ouvre la fenêtre existante
@@ -113,8 +114,15 @@ app.on("window-all-closed", (event) => {
   event.preventDefault()
 })
 
-app.on("before-quit", () => {
-  if (sync) sync.stop()
+app.on("before-quit", (event) => {
+  // Prévient le serveur (session arrêtée) avant de couper — best effort,
+  // 4 s max, puis on quitte vraiment.
+  if (sync && !app.__offlineSent) {
+    event.preventDefault()
+    app.__offlineSent = true
+    sync.stop()
+    Promise.race([api.agentOffline(), new Promise((r) => setTimeout(r, 4000))]).finally(() => app.quit())
+  }
 })
 
 // --- IPC exposé au renderer via preload.js ---
@@ -129,13 +137,19 @@ const SETTING_KEYS = [
 ]
 
 function configSnapshot() {
+  const server = store.get("serverSettings") || {}
   const out = {
     serverUrl: store.get("serverUrl"),
     userLabel: store.get("userLabel"),
     autoLaunch: store.get("autoLaunch"),
     isLoggedIn: !!store.get("token"),
+    agentId: store.get("agentId") || null,
+    agentLabel: store.get("agentLabel") || "",
+    hostname: api.HOSTNAME,
   }
-  for (const k of SETTING_KEYS) out[k] = store.get(k)
+  // Réglages : ceux du serveur (modifiables aussi depuis le B2B), repli
+  // sur les défauts locaux tant que le poste n'est pas enregistré.
+  for (const k of SETTING_KEYS) out[k] = server[k] ?? store.get(k)
   return out
 }
 
@@ -149,12 +163,26 @@ function friendly(err) {
 
 ipcMain.handle("config:get", () => configSnapshot())
 
-ipcMain.handle("config:setSettings", (_e, partial) => {
+ipcMain.handle("config:setSettings", async (_e, partial) => {
+  const settings = {}
   for (const k of SETTING_KEYS) {
     if (partial && partial[k] !== undefined) {
       const n = Number(partial[k])
-      if (Number.isFinite(n) && n >= 0) store.set(k, n)
+      if (Number.isFinite(n) && n >= 0) settings[k] = n
     }
+  }
+  // Source de vérité = serveur (DesktopSyncController::update) ; l'agent
+  // recharge ensuite sa config. Sans agent enregistré, on garde en local.
+  const agentId = store.get("agentId")
+  if (agentId) {
+    try {
+      await api.updateAgentSettings(agentId, settings)
+      await sync.refreshConfig()
+    } catch (err) {
+      throw friendly(err)
+    }
+  } else {
+    for (const [k, v] of Object.entries(settings)) store.set(k, v)
   }
   if (sync) sync.dispatch()
   return configSnapshot()
@@ -179,8 +207,12 @@ ipcMain.handle("auth:login", async (_e, { serverUrl, logon, password }) => {
     store.set("serverUrl", data.serverUrl || serverUrl)
     store.set("token", data.token)
     store.set("userLabel", `${data.first_name || ""} ${data.last_name || ""}`.trim() || data.logon)
-    if (sync) sync.scanNow()
-    return { userLabel: store.get("userLabel") }
+    if (sync) {
+      sync.registered = false
+      await sync.register()
+      sync.scanNow()
+    }
+    return { userLabel: store.get("userLabel"), agentLabel: store.get("agentLabel") }
   } catch (err) {
     throw friendly(err)
   }
@@ -200,9 +232,12 @@ ipcMain.handle("auth:ping", async (_e, serverUrl) => {
   }
 })
 
-ipcMain.handle("auth:logout", () => {
+ipcMain.handle("auth:logout", async () => {
+  await api.agentOffline()
+  if (sync) sync.registered = false
   store.set("token", "")
   store.set("userLabel", "")
+  store.set("agentId", null)
 })
 
 ipcMain.handle("s3:browse", async (_e, prefix) => {
@@ -213,9 +248,16 @@ ipcMain.handle("s3:browse", async (_e, prefix) => {
   }
 })
 
-ipcMain.handle("inst:add", (_e, payload) => sync.addInstance(payload))
-ipcMain.handle("inst:update", (_e, id, patch) => sync.updateInstance(id, patch))
-ipcMain.handle("inst:remove", (_e, id) => sync.removeInstance(id))
+const wrap = (fn) => async (...args) => {
+  try {
+    return await fn(...args)
+  } catch (err) {
+    throw friendly(err)
+  }
+}
+ipcMain.handle("inst:add", wrap((_e, payload) => sync.addInstance(payload)))
+ipcMain.handle("inst:update", wrap((_e, id, patch) => sync.updateInstance(id, patch)))
+ipcMain.handle("inst:remove", wrap((_e, id) => sync.removeInstance(id)))
 ipcMain.handle("inst:reset", (_e, id) => sync.resetInstance(id))
 ipcMain.handle("inst:openFolder", (_e, id) => {
   const inst = sync.instances().find((i) => i.id === id)

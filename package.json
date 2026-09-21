@@ -36,8 +36,16 @@
       "build/**/*"
     ],
     "win": {
-      "target": "nsis",
-      "icon": "build/icon.png"
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "icon": "build/icon.png",
+      "artifactName": "PackSpace-S3-Sync-${version}-win-${arch}.${ext}"
     },
     "nsis": {
       "oneClick": false,
@@ -46,19 +54,38 @@
     },
     "mac": {
       "target": [
-        "dmg",
-        "zip"
+        {
+          "target": "dmg",
+          "arch": [
+            "x64",
+            "arm64"
+          ]
+        }
       ],
       "icon": "build/icon.png",
-      "category": "public.app-category.productivity"
+      "category": "public.app-category.productivity",
+      "artifactName": "PackSpace-S3-Sync-${version}-mac-${arch}.${ext}"
     },
     "linux": {
       "target": [
-        "AppImage",
-        "deb"
+        {
+          "target": "AppImage",
+          "arch": [
+            "x64"
+          ]
+        },
+        {
+          "target": "deb",
+          "arch": [
+            "x64"
+          ]
+        }
       ],
       "icon": "build/icon.png",
-      "category": "Utility"
-    }
+      "category": "Utility",
+      "artifactName": "PackSpace-S3-Sync-${version}-linux-${arch}.${ext}"
+    },
+    "artifactName": "PackSpace-S3-Sync-${version}-${os}-${arch}.${ext}",
+    "publish": null
   }
 }

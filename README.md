@@ -50,6 +50,26 @@ Le tooltip du tray résume l'activité (nb de fichiers, débit cumulé).
 Côté backend : `API2/app/Http/Controllers/DesktopFilesController.php`
 (`browse`, `listObjects`, `agentToken`), `S3FileController::presignDownload`.
 
+## Pilotage depuis l'app B2B
+
+Depuis Packspace → Paramètres → **Synchro impression** (`/sync-agents`,
+admin/opérateur), on voit chaque **poste** (PC) qui a démarré une session
+de synchronisation, en ligne / hors ligne, avec le compte utilisé ; on y
+modifie les **réglages** de parallélisme et les **instances** (dossier S3 →
+dossier local), on suit l'**avancement en direct** (heartbeat toutes les
+`pollIntervalMs`), et on consulte l'**historique** (fichiers synchronisés,
+sessions, réglages) et les **erreurs**. Les commandes Pause / Reprendre /
+Vérifier / Réessayer / Re-vérifier sont exécutées par l'agent au heartbeat
+suivant.
+
+Le serveur (`DesktopSyncController`) est la source de vérité pour les
+réglages et les instances ; l'agent ne garde en local que les manifestes,
+le jeton et un cache de la dernière config. Les instances créées dans une
+ancienne version de l'agent sont importées au premier enregistrement du
+poste. Chaque fichier synchronisé déclenche une notification in-app
+(cloche du B2B) pour admin/opérateur ; chaque erreur aussi ; chaque
+démarrage de session, pour les admins.
+
 ## Développement
 
 ```bash
@@ -87,17 +107,61 @@ Ils prennent effet immédiatement, sans redémarrage.
   fichiers déjà présents à la bonne taille ne sont pas re-téléchargés).
 - **Supprimer** : retire l'instance ; les fichiers locaux restent.
 
-## Packager
+## Packager et publier (téléchargement depuis le B2B)
+
+La publication est automatisée par `.github/workflows/release.yml` :
 
 ```bash
-npm run dist:win    # .exe NSIS (depuis Windows)
-npm run dist:mac    # .dmg/.zip (depuis macOS ; signature/notarization à part)
-npm run dist:linux  # .AppImage/.deb
+# 1. bumper la version et pousser un tag
+npm version 1.0.1            # met à jour package.json + crée le tag v1.0.1
+git push && git push --tags  # déclenche le workflow "Release"
+```
+
+Le workflow construit sur trois runners (`windows-latest`, `macos-latest`,
+`ubuntu-latest`) les installeurs `PackSpace-S3-Sync-<version>-win-x64.exe`,
+`…-mac-arm64.dmg`, `…-mac-x64.dmg`, `…-linux-x64.AppImage`, `…-linux-x64.deb`,
+puis les envoie dans le bucket S3 principal sous
+`desktop-agent/releases/<version>/` et écrit `desktop-agent/latest.json`.
+(Alternative : onglet Actions → « Release » → *Run workflow* avec la version.)
+
+Secrets/variables à définir dans ce dépôt GitHub (mêmes valeurs que le
+monorepo) : `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY` (secrets),
+`AWS_REGION`, `AWS_BUCKET` (variables).
+
+Côté B2B, la page **Paramètres → Synchro impression** lit `latest.json` via
+`GET /desktop/sync/releases` (API2, staff uniquement) et affiche une carte
+« Installer l'agent sur un poste » avec les boutons de téléchargement par
+système (URLs S3 présignées valables 1 h) et les étapes d'installation.
+
+Build manuel sans CI (chaque OS depuis cet OS) :
+
+```bash
+npm run dist:win    # .exe NSIS
+npm run dist:mac    # .dmg x64 + arm64 (signature/notarization à part)
+npm run dist:linux  # .AppImage + .deb
 ```
 
 Remplacer `build/icon.png` (512×512 ou 1024×1024) avant de packager.
-Packager chaque OS depuis cet OS (ou via des runners CI
-`windows-latest` / `macos-latest` / `ubuntu-latest`).
+
+### Installation sur un poste
+
+1. Télécharger l'installeur depuis le B2B (ou `release/` après un build).
+2. Windows : lancer le `.exe`, choisir le dossier, « Installer ». Les
+   installeurs ne sont pas signés → SmartScreen : « Informations
+   complémentaires » → « Exécuter quand même ». macOS : ouvrir le `.dmg`,
+   glisser l'app dans Applications, puis clic droit → « Ouvrir » la première
+   fois. Linux : `chmod +x *.AppImage && ./*.AppImage` ou
+   `sudo dpkg -i *.deb`.
+3. Au premier lancement : adresse de l'API (bouton « Tester »), puis
+   connexion avec un compte administrateur ou opérateur.
+4. Le poste apparaît « En ligne » dans le B2B ; y ajouter les dossiers à
+   synchroniser (ou depuis l'agent).
+5. L'agent démarre avec la session et vit dans la zone de notification.
+
+Pour supprimer les avertissements de sécurité : certificat de signature
+Windows (OV/EV) et Apple Developer ID + notarization, à brancher via les
+variables `CSC_LINK` / `CSC_KEY_PASSWORD` / `APPLE_ID` d'electron-builder
+dans le workflow.
 
 ## Config locale
 
