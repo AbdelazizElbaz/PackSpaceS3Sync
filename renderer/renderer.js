@@ -475,6 +475,62 @@ $("serviceUninstallBtn").addEventListener("click", async () => {
   }
 })
 
+// ---------- mise à jour ----------
+// Bannière "nouvelle version disponible" — vérifiée au démarrage puis
+// toutes les 2 h (voir Engine.checkUpdate). "Mettre à jour" télécharge et
+// lance l'installeur puis ferme l'agent (mode session) ou, si le service
+// est installé, la demande part vers le VRAI processus service qui
+// s'installe silencieusement et redémarre seul (voir selfUpdater.js) —
+// même bouton, l'agent choisit le bon comportement.
+
+let updateInfo = null
+let dismissedUpdateVersion = null
+
+async function refreshUpdateBanner() {
+  try {
+    updateInfo = await window.agent.checkUpdate()
+  } catch {
+    updateInfo = null
+  }
+  const banner = $("updateBanner")
+  if (!updateInfo?.available || updateInfo.version === dismissedUpdateVersion) {
+    banner.classList.add("hidden")
+    return
+  }
+  $("updateBannerText").textContent = `Nouvelle version disponible : v${updateInfo.version} (actuelle : v${updateInfo.current || "?"})`
+  banner.classList.remove("hidden")
+}
+
+$("updateDismissBtn").addEventListener("click", () => {
+  dismissedUpdateVersion = updateInfo?.version || null
+  $("updateBanner").classList.add("hidden")
+})
+
+$("updateApplyBtn").addEventListener("click", async () => {
+  if (
+    !confirm(
+      `Télécharger et installer la version v${updateInfo?.version} ?\n\n` +
+        "L'agent va se fermer pour terminer l'installation (mode session) ou redémarrer tout seul (mode service, synchro brièvement interrompue)."
+    )
+  )
+    return
+  const btn = $("updateApplyBtn")
+  btn.disabled = true
+  btn.textContent = "Téléchargement…"
+  try {
+    await window.agent.applyUpdate()
+    $("updateBannerText").textContent = "Mise à jour en cours — l'agent va se fermer ou redémarrer dans quelques secondes."
+    btn.classList.add("hidden")
+    $("updateDismissBtn").classList.add("hidden")
+  } catch (e) {
+    alert(e?.message || "Mise à jour impossible.")
+    btn.disabled = false
+    btn.textContent = "Mettre à jour"
+  }
+})
+
+setInterval(refreshUpdateBanner, 2 * 60 * 60 * 1000)
+
 // ---------- synchro : actions globales ----------
 
 $("scanNowBtn").addEventListener("click", () => window.agent.scanNow())
@@ -492,3 +548,4 @@ window.agent.onAuthLost(async () => {
 })
 refreshConfig()
 window.agent.getState().then(render)
+refreshUpdateBanner()

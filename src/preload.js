@@ -31,6 +31,10 @@ contextBridge.exposeInMainWorld("agent", {
   serviceInstall: () => ipcRenderer.invoke("service:install"),
   serviceUninstall: () => ipcRenderer.invoke("service:uninstall"),
 
+  // Mise à jour de l'agent (voir selfUpdater.js)
+  checkUpdate: () => ipcRenderer.invoke("update:check"),
+  applyUpdate: () => ipcRenderer.invoke("update:apply"),
+
   onAuthLost: (callback) => {
     const listener = () => callback()
     ipcRenderer.on("auth:lost", listener)

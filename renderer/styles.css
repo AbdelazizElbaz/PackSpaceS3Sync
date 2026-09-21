@@ -110,3 +110,6 @@ button.icon { padding: 2px 8px; background: transparent; color: #2f6394; font-si
 .service-box .badge.warn { background: #fef3c7; color: #92400e; }
 .service-box .badge.err { background: #fee2e2; color: #991b1b; }
 .service-banner { background: #fef3c7; color: #92400e; font-size: 12px; padding: 6px 12px; border-bottom: 1px solid #fde68a; }
+.update-banner { display: flex; align-items: center; gap: 10px; background: #eff6ff; color: #1e40af; font-size: 12px; padding: 6px 12px; border-bottom: 1px solid #bfdbfe; }
+.update-banner button.small { margin-inline-start: auto; }
+.update-banner button.small.ghost { margin-inline-start: 0; }

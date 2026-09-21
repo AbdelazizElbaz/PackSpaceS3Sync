@@ -339,9 +339,40 @@ class SyncManager {
       case "reset":
         if (instanceId) this.resetInstance(instanceId)
         break
+      case "update":
+        this.applyUpdate()
+        break
       default:
         break
     }
+  }
+
+  // Mise à jour déclenchée à distance (commande B2B) — voir Engine.applyUpdate
+  // pour les cas déclenchés depuis la fenêtre. `_updating` évite de relancer
+  // le téléchargement si la commande revient avant que la précédente ait
+  // fini (elle n'est retirée de pending_commands qu'une fois lue, mais on
+  // ne veut pas non plus de doublon si l'admin clique deux fois).
+  applyUpdate() {
+    if (this._updating) return
+    this._updating = true
+    this.queueEvent({ type: "update_started", level: "info", message: "Mise à jour demandée." })
+    require("./selfUpdater")
+      .applyUpdate({ log: (level, message) => this.queueEvent({ type: level === "error" ? "update_failed" : "update_started", level, message }) })
+      .then((r) => {
+        this._updating = false
+        if (r?.applied) {
+          this.queueEvent({ type: "update_applied", level: "info", message: `Version ${r.version} installée.` })
+          this.flushEvents().catch(() => {})
+        }
+        // r.applied avec restarting=true ou en mode session : le process
+        // se termine lui-même juste après (voir selfUpdater) — pas besoin
+        // de faire quoi que ce soit de plus ici.
+      })
+      .catch((err) => {
+        this._updating = false
+        this.queueEvent({ type: "update_failed", level: "error", message: `Mise à jour échouée : ${describe(err)}` })
+        this.flushEvents().catch(() => {})
+      })
   }
 
   // ---------- boucle ----------

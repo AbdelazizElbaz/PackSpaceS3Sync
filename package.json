@@ -12,7 +12,7 @@
   "private": true,
   "scripts": {
     "start": "electron .",
-    "check": "node --check src/main.js && node --check src/preload.js && node --check src/store.js && node --check src/api.js && node --check src/engine.js && node --check src/syncManager.js && node --check src/service.js && node --check src/controlServer.js && node --check src/controlClient.js && node --check src/serviceInstaller.js && node --check src/uninstallHook.js && node --check src/workers/downloadWorker.js && node --check renderer/renderer.js && node --check renderer/web-agent.js",
+    "check": "node --check src/main.js && node --check src/preload.js && node --check src/store.js && node --check src/api.js && node --check src/engine.js && node --check src/syncManager.js && node --check src/service.js && node --check src/controlServer.js && node --check src/controlClient.js && node --check src/serviceInstaller.js && node --check src/uninstallHook.js && node --check src/updateUtils.js && node --check src/selfUpdater.js && node --check src/workers/downloadWorker.js && node --check renderer/renderer.js && node --check renderer/web-agent.js",
     "dist": "electron-builder --publish never",
     "dist:win": "electron-builder --win --publish never",
     "dist:mac": "electron-builder --mac --publish never",

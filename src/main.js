@@ -321,6 +321,16 @@ ipcMain.handle("sync:retryFailed", wrap((_e, instanceId) => backend.call("retryF
 ipcMain.handle("sync:pause", wrap(() => backend.call("pause")))
 ipcMain.handle("sync:resume", wrap(() => backend.call("resume")))
 
+// ---------- mise à jour ----------
+// checkUpdate: simple vérification (bannière). applyUpdate: télécharge et
+// installe réellement — en mode service, la commande part en RPC vers le
+// VRAI processus service (silencieux, redémarre seul) ; en mode session,
+// c'est CE processus Electron qui se ferme juste après avoir lancé
+// l'assistant d'installation (voir selfUpdater.js). Le timeout est élevé :
+// le téléchargement de l'installeur peut prendre plus d'une minute.
+ipcMain.handle("update:check", wrap(() => backend.call("checkUpdate")))
+ipcMain.handle("update:apply", wrap(() => backend.call("applyUpdate", [], 180000)))
+
 // ---------- mode service ----------
 
 ipcMain.handle("service:status", async () => {

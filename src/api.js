@@ -225,6 +225,15 @@ async function deleteInstance(id) {
   await client().delete(`/desktop/sync/instances/${id}`)
 }
 
+// Dernière version publiée (installeurs présignés 1 h, voir
+// DesktopSyncController::releases()) — même endpoint que la carte de
+// téléchargement du B2B ; l'agent y a accès avec son propre jeton (rôle
+// admin/operator). { available, version, assets:[{os,arch,kind,name,size,url}] }
+async function fetchLatestRelease() {
+  const res = await client().get("/desktop/sync/releases")
+  return res.data
+}
+
 // Vérifie que le token stocké est encore valide (GET /me) — utilisé au
 // démarrage pour afficher "reconnexion nécessaire" plutôt que de laisser
 // le poll échouer silencieusement en 401.
@@ -248,6 +257,7 @@ module.exports = {
   listAllObjects,
   registerAgent,
   fetchAgentConfig,
+  fetchLatestRelease,
   heartbeat,
   pushEvents,
   agentOffline,

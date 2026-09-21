@@ -1,6 +1,7 @@
 const store = require("./store")
 const api = require("./api")
 const SyncManager = require("./syncManager")
+const { PLATFORM_OS, pickAsset, isNewerVersion } = require("./updateUtils")
 
 // Cœur de l'agent, SANS Electron : SyncManager + toutes les opérations que
 // l'interface peut demander (connexion, instances, réglages, commandes).
@@ -116,6 +117,40 @@ class Engine {
     return api.ping(serverUrl)
   }
 
+  // Vérifie la dernière version publiée (même source que la carte de
+  // téléchargement du B2B) et renvoie de quoi la fenêtre affiche une
+  // bannière ou la déclenche : { available, version, current, asset } —
+  // asset=null si aucun installeur pour cette plateforme (ou aucune
+  // release publiée). Ne throw jamais : un souci réseau => juste
+  // "non disponible", pas d'erreur qui interromprait l'appelant.
+  async checkUpdate() {
+    try {
+      const rel = await api.fetchLatestRelease()
+      if (!rel?.available || !rel.version) return { available: false, current: api.APP_VERSION }
+      const asset = pickAsset(rel.assets, PLATFORM_OS[process.platform] || null)
+      const available = isNewerVersion(rel.version, api.APP_VERSION) && !!asset
+      return { available, version: rel.version, current: api.APP_VERSION, asset }
+    } catch {
+      return { available: false, current: api.APP_VERSION }
+    }
+  }
+
+  // Déclenche réellement la mise à jour (téléchargement + installation) —
+  // voir selfUpdater.js pour le détail par plateforme/mode. Appelable :
+  //  - depuis la fenêtre en mode session (bannière "nouvelle version"),
+  //  - depuis la fenêtre en mode service, via l'API de contrôle (RPC vers
+  //    le VRAI processus service, pas la fenêtre) — même bouton, même
+  //    résultat ;
+  //  - à distance depuis le B2B, via la commande "update" (voir
+  //    SyncManager.runCommand) reçue au heartbeat suivant.
+  // Le process peut se terminer lui-même en cas de succès (voir
+  // selfUpdater) : l'appelant ne doit pas compter sur une réponse RPC dans
+  // ce cas (la connexion se coupe simplement).
+  applyUpdate() {
+    const { applyUpdate } = require("./selfUpdater")
+    return applyUpdate({ log: this.log })
+  }
+
   async login({ serverUrl, logon, password }) {
     const data = await api.login(serverUrl, logon, password)
     store.set("serverUrl", data.serverUrl || serverUrl)
@@ -200,6 +235,8 @@ Engine.METHODS = [
   "getConfig",
   "setSettings",
   "ping",
+  "checkUpdate",
+  "applyUpdate",
   "login",
   "logout",
   "browse",

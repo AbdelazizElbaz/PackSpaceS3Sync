@@ -100,6 +100,12 @@
     retryFailed: (instanceId) => rpc("retryFailed", [instanceId || null]),
     pause: () => rpc("pause"),
     resume: () => rpc("resume"),
+    // Vérification OK (juste une comparaison de version) ; l'installation
+    // silencieuse elle-même refuse proprement en conteneur (voir
+    // selfUpdater.js isContainer()) : ici la mise à jour se fait en
+    // changeant le tag d'image Docker, pas depuis cette page.
+    checkUpdate: () => rpc("checkUpdate"),
+    applyUpdate: () => rpc("applyUpdate"),
     serviceStatus: async () => ({ supported: false, reason: NOT_AVAILABLE, installed: false, running: true, mode: "web" }),
     serviceInstall: async () => {
       throw new Error(NOT_AVAILABLE)
