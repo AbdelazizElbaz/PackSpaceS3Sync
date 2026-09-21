@@ -4,16 +4,19 @@
   "version": "1.0.0",
   "description": "Synchronise automatiquement (multi-thread) les fichiers d'impression Packspace depuis S3 vers un dossier local.",
   "main": "src/main.js",
-  "author": "Packspace",
+  "author": {
+    "name": "Packspace",
+    "email": "contact@packspace.ma"
+  },
   "license": "UNLICENSED",
   "private": true,
   "scripts": {
     "start": "electron .",
     "check": "node --check src/main.js && node --check src/preload.js && node --check src/store.js && node --check src/api.js && node --check src/syncManager.js && node --check src/workers/downloadWorker.js && node --check renderer/renderer.js",
-    "dist": "electron-builder",
-    "dist:win": "electron-builder --win",
-    "dist:mac": "electron-builder --mac",
-    "dist:linux": "electron-builder --linux"
+    "dist": "electron-builder --publish never",
+    "dist:win": "electron-builder --win --publish never",
+    "dist:mac": "electron-builder --mac --publish never",
+    "dist:linux": "electron-builder --linux --publish never"
   },
   "dependencies": {
     "auto-launch": "^5.0.6",
@@ -83,7 +86,15 @@
       ],
       "icon": "build/icon.png",
       "category": "Utility",
-      "artifactName": "PackSpace-S3-Sync-${version}-linux-${arch}.${ext}"
+      "artifactName": "PackSpace-S3-Sync-${version}-linux-${arch}.${ext}",
+      "maintainer": "Packspace <contact@packspace.ma>",
+      "desktop": {
+        "entry": {
+          "Name": "PackSpace S3 Sync",
+          "StartupWMClass": "packspace-s3-sync"
+        }
+      },
+      "synopsis": "Synchronisation des fichiers d'impression Packspace"
     },
     "artifactName": "PackSpace-S3-Sync-${version}-${os}-${arch}.${ext}",
     "publish": null
