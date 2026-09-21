@@ -1,0 +1,34 @@
+const { contextBridge, ipcRenderer } = require("electron")
+
+// Surface IPC minimale exposée au renderer (contextIsolation activé, pas
+// d'accès direct à Node/Electron depuis la page — voir main.js).
+contextBridge.exposeInMainWorld("agent", {
+  getConfig: () => ipcRenderer.invoke("config:get"),
+  setSettings: (partial) => ipcRenderer.invoke("config:setSettings", partial),
+  chooseDir: () => ipcRenderer.invoke("config:chooseDir"),
+  setAutoLaunch: (enabled) => ipcRenderer.invoke("config:setAutoLaunch", enabled),
+  ping: (serverUrl) => ipcRenderer.invoke("auth:ping", serverUrl),
+  login: (payload) => ipcRenderer.invoke("auth:login", payload),
+  logout: () => ipcRenderer.invoke("auth:logout"),
+
+  // Explorateur S3 (PrintProd)
+  browse: (prefix) => ipcRenderer.invoke("s3:browse", prefix),
+
+  // Instances de synchronisation
+  addInstance: (payload) => ipcRenderer.invoke("inst:add", payload),
+  updateInstance: (id, patch) => ipcRenderer.invoke("inst:update", id, patch),
+  removeInstance: (id) => ipcRenderer.invoke("inst:remove", id),
+  resetInstance: (id) => ipcRenderer.invoke("inst:reset", id),
+  openInstanceFolder: (id) => ipcRenderer.invoke("inst:openFolder", id),
+
+  getState: () => ipcRenderer.invoke("sync:state"),
+  scanNow: () => ipcRenderer.invoke("sync:scanNow"),
+  retryFailed: (instanceId) => ipcRenderer.invoke("sync:retryFailed", instanceId),
+  pause: () => ipcRenderer.invoke("sync:pause"),
+  resume: () => ipcRenderer.invoke("sync:resume"),
+  onStateUpdate: (callback) => {
+    const listener = (_event, state) => callback(state)
+    ipcRenderer.on("sync:update", listener)
+    return () => ipcRenderer.removeListener("sync:update", listener)
+  },
+})

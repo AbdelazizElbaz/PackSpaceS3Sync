@@ -1,0 +1,119 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8" />
+  <title>PackSpace S3 Sync</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <header class="topbar">
+    <span class="brand">PackSpace S3 Sync</span>
+    <span class="topbar-right">
+      <span id="globalStatus" class="global-status"></span>
+      <span id="userLabel" class="user-label"></span>
+    </span>
+  </header>
+
+  <!-- ---------- Connexion ---------- -->
+  <section id="loginView" class="view login">
+    <h2>Connexion</h2>
+    <label>Adresse de l'API</label>
+    <div class="dir-row">
+      <input id="serverUrl" type="text" placeholder="https://api.om.packspace.ma (le /api est ajouté automatiquement)" />
+      <button id="pingBtn" class="small ghost" type="button">Tester</button>
+    </div>
+    <p id="pingResult" class="hint"></p>
+    <label>Identifiant</label>
+    <input id="logon" type="text" placeholder="Identifiant Packspace" />
+    <label>Mot de passe</label>
+    <input id="password" type="password" placeholder="Mot de passe" />
+    <button id="loginBtn">Se connecter</button>
+    <p id="loginError" class="error"></p>
+    <p class="hint">Compte administrateur ou opérateur requis. Le mot de passe n'est jamais stocké : l'agent obtient un jeton dédié valable 1 an.</p>
+  </section>
+
+  <!-- ---------- Application ---------- -->
+  <section id="mainView" class="view main hidden">
+    <!-- Colonne gauche : explorateur S3 -->
+    <aside class="pane explorer">
+      <div class="pane-head">
+        <strong>Dossier d'impression (S3)</strong>
+        <button id="refreshBrowseBtn" class="icon" title="Actualiser">↻</button>
+      </div>
+      <div id="crumbs" class="crumbs"></div>
+      <div id="browseError" class="error"></div>
+      <div id="browseList" class="browse-list"><p class="empty">Chargement…</p></div>
+      <div class="pane-foot">
+        <button id="createInstanceBtn" class="primary">Synchroniser ce dossier…</button>
+      </div>
+    </aside>
+
+    <!-- Colonne droite : instances + fichiers -->
+    <main class="pane content">
+      <div class="pane-head">
+        <strong>Instances de synchronisation</strong>
+        <span class="head-actions">
+          <button id="scanNowBtn" class="small">Vérifier maintenant</button>
+          <button id="pauseBtn" class="small">Pause</button>
+          <button id="settingsBtn" class="small">Réglages</button>
+          <button id="logoutBtn" class="small danger">Déconnexion</button>
+        </span>
+      </div>
+
+      <div id="instances" class="instances"><p class="empty">Aucune instance. Choisissez un dossier à gauche puis « Synchroniser ce dossier… ».</p></div>
+
+      <div class="pane-head">
+        <strong>Fichiers</strong>
+        <span id="summary" class="summary"></span>
+      </div>
+      <div id="list" class="list"><p class="empty">Aucun fichier en cours.</p></div>
+    </main>
+  </section>
+
+  <!-- ---------- Dialog : nouvelle instance ---------- -->
+  <div id="instanceDialog" class="modal hidden">
+    <div class="modal-box">
+      <h3>Nouvelle instance de synchronisation</h3>
+      <label>Dossier S3</label>
+      <input id="instPrefix" type="text" readonly />
+      <label>Nom</label>
+      <input id="instName" type="text" placeholder="ex. Machine HP — septembre" />
+      <label>Dossier local de destination</label>
+      <div class="dir-row">
+        <input id="instLocalDir" type="text" readonly placeholder="Choisir un dossier…" />
+        <button id="instChooseDirBtn" class="small">Choisir…</button>
+      </div>
+      <p id="instError" class="error"></p>
+      <div class="modal-actions">
+        <button id="instCancelBtn" class="small ghost">Annuler</button>
+        <button id="instSaveBtn" class="primary">Créer et démarrer</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ---------- Dialog : réglages ---------- -->
+  <div id="settingsDialog" class="modal hidden">
+    <div class="modal-box">
+      <h3>Parallélisme &amp; réglages</h3>
+      <div class="grid">
+        <label>Fichiers en parallèle (threads)<input id="maxParallelFiles" type="number" min="1" max="16" /></label>
+        <label>Morceaux par fichier<input id="maxParallelChunks" type="number" min="1" max="16" /></label>
+        <label>Taille d'un morceau (Mo)<input id="chunkSizeMb" type="number" min="1" max="256" /></label>
+        <label>Découper à partir de (Mo)<input id="chunkThresholdMb" type="number" min="1" max="1024" /></label>
+        <label>Vérification des dossiers (s)<input id="pollIntervalSec" type="number" min="2" max="600" /></label>
+        <label>Tentatives max<input id="maxRetries" type="number" min="0" max="20" /></label>
+      </div>
+      <div class="row">
+        <span class="lbl">Démarrer avec l'ordinateur</span>
+        <label class="switch"><input type="checkbox" id="autoLaunchToggle" /><span class="slider"></span></label>
+      </div>
+      <div class="modal-actions">
+        <button id="settingsCloseBtn" class="small ghost">Fermer</button>
+        <button id="saveSettingsBtn" class="primary">Enregistrer</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="renderer.js"></script>
+</body>
+</html>
