@@ -26,6 +26,16 @@ contextBridge.exposeInMainWorld("agent", {
   retryFailed: (instanceId) => ipcRenderer.invoke("sync:retryFailed", instanceId),
   pause: () => ipcRenderer.invoke("sync:pause"),
   resume: () => ipcRenderer.invoke("sync:resume"),
+  // Mode service (l'agent tourne sans session ouverte)
+  serviceStatus: () => ipcRenderer.invoke("service:status"),
+  serviceInstall: () => ipcRenderer.invoke("service:install"),
+  serviceUninstall: () => ipcRenderer.invoke("service:uninstall"),
+
+  onAuthLost: (callback) => {
+    const listener = () => callback()
+    ipcRenderer.on("auth:lost", listener)
+    return () => ipcRenderer.removeListener("auth:lost", listener)
+  },
   onStateUpdate: (callback) => {
     const listener = (_event, state) => callback(state)
     ipcRenderer.on("sync:update", listener)

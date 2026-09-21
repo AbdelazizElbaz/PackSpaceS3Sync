@@ -12,16 +12,17 @@
   "private": true,
   "scripts": {
     "start": "electron .",
-    "check": "node --check src/main.js && node --check src/preload.js && node --check src/store.js && node --check src/api.js && node --check src/syncManager.js && node --check src/workers/downloadWorker.js && node --check renderer/renderer.js",
+    "check": "node --check src/main.js && node --check src/preload.js && node --check src/store.js && node --check src/api.js && node --check src/engine.js && node --check src/syncManager.js && node --check src/service.js && node --check src/controlServer.js && node --check src/controlClient.js && node --check src/serviceInstaller.js && node --check src/workers/downloadWorker.js && node --check renderer/renderer.js",
     "dist": "electron-builder --publish never",
     "dist:win": "electron-builder --win --publish never",
     "dist:mac": "electron-builder --mac --publish never",
-    "dist:linux": "electron-builder --linux --publish never"
+    "dist:linux": "electron-builder --linux --publish never",
+    "service:dev": "node src/service.js"
   },
   "dependencies": {
     "auto-launch": "^5.0.6",
     "axios": "^1.7.7",
-    "electron-store": "^8.2.0"
+    "conf": "^10.2.0"
   },
   "devDependencies": {
     "electron": "^44.4.3",
@@ -36,7 +37,8 @@
     "files": [
       "src/**/*",
       "renderer/**/*",
-      "build/**/*"
+      "build/**/*",
+      "!**/*.map"
     ],
     "win": {
       "target": [
@@ -97,6 +99,10 @@
       "synopsis": "Synchronisation des fichiers d'impression Packspace"
     },
     "artifactName": "PackSpace-S3-Sync-${version}-${os}-${arch}.${ext}",
-    "publish": null
+    "publish": null,
+    "asar": false
+  },
+  "optionalDependencies": {
+    "node-windows": "1.0.0-beta.8"
   }
 }

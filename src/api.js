@@ -2,10 +2,24 @@ const axios = require("axios")
 const os = require("os")
 const store = require("./store")
 
-// Identité du poste envoyée à API2 sur chaque appel "agent" (voir
-// DesktopSyncController::agentFor) : le serveur retrouve l'enregistrement
-// (user connecté, hostname) sans id à stocker côté agent.
+// Identité du poste envoyée à API2 sur chaque appel "agent" (en-têtes
+// X-Agent-Id + X-Agent-Host, voir DesktopSyncController::agentFor).
 const HOSTNAME = os.hostname()
+
+// Identifiant MACHINE stable (UUID généré une fois et persisté dans la
+// config) : c'est lui, pas le compte connecté, qui identifie le poste côté
+// API2 (DesktopSyncController::agentFor). Se déconnecter puis se reconnecter
+// avec un autre compte retrouve donc le MÊME poste, ses instances et ses
+// manifestes — sur demande : "déconnexion connexion ça crée une nouvelle
+// session".
+function machineId() {
+  let id = store.get("machineId")
+  if (!id) {
+    id = require("crypto").randomUUID()
+    store.set("machineId", id)
+  }
+  return id
+}
 const APP_VERSION = (() => {
   try {
     return require("../package.json").version
@@ -28,6 +42,7 @@ function client() {
       Authorization: `Bearer ${store.get("token")}`,
       Accept: "application/json",
       "X-Agent-Host": HOSTNAME,
+      "X-Agent-Id": machineId(),
     },
     timeout: 30000,
   })
@@ -148,6 +163,7 @@ async function listAllObjects(prefix, maxPages = 50) {
 // le poste est nouveau côté serveur (migration depuis electron-store).
 async function registerAgent(localInstances = [], localSettings = {}) {
   const res = await client().post("/desktop/agent/register", {
+    machine_id: machineId(),
     hostname: HOSTNAME,
     platform: process.platform,
     app_version: APP_VERSION,
@@ -213,6 +229,7 @@ async function whoami() {
 
 module.exports = {
   HOSTNAME,
+  machineId,
   APP_VERSION,
   normalizeServerUrl,
   ping,

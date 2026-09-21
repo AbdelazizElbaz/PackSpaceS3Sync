@@ -3,8 +3,20 @@ const path = require("path")
 const AutoLaunch = require("auto-launch")
 const store = require("./store")
 const api = require("./api")
-const { login, browse, ping } = api
-const SyncManager = require("./syncManager")
+const Engine = require("./engine")
+const ControlClient = require("./controlClient")
+const serviceInstaller = require("./serviceInstaller")
+
+// Processus Electron = fenêtre + icône de zone de notification. Le moteur
+// de synchro (Engine) tourne :
+//   - mode "session" : ICI, dans ce processus (LocalBackend) — l'agent
+//     s'arrête quand l'utilisateur ferme sa session ;
+//   - mode "service" : dans un SERVICE de l'OS (src/service.js, installé
+//     depuis Réglages → Mode service) qui continue sans session ouverte ;
+//     la fenêtre n'est alors qu'un client de son API de contrôle locale
+//     (ServiceBackend → controlClient.js).
+// Les deux backends exposent la même interface `call(method, args)`, le
+// renderer ne voit pas la différence.
 
 // Une seule instance : un second lancement ré-ouvre la fenêtre existante
 // au lieu de démarrer un second agent qui téléchargerait les mêmes
@@ -16,7 +28,8 @@ if (!gotLock) {
 
 let mainWindow = null
 let tray = null
-let sync = null
+let backend = null
+let lastAuthLost = false
 
 const autoLauncher = new AutoLaunch({ name: "PackSpace S3 Sync" })
 
@@ -62,7 +75,7 @@ function buildTray() {
   tray.setContextMenu(
     Menu.buildFromTemplate([
       { label: "Ouvrir", click: () => createWindow() },
-      { label: "Vérifier maintenant", click: () => sync && sync.scanNow() },
+      { label: "Vérifier maintenant", click: () => backend && backend.call("scanNow").catch(() => {}) },
       { type: "separator" },
       {
         label: "Quitter",
@@ -77,28 +90,108 @@ function buildTray() {
 }
 
 function pushState(state) {
+  if (!state) return
+  // Jeton révoqué (poste supprimé depuis le B2B) ou expiré : le moteur a
+  // déjà effacé la session (engine.handleState) ; on ramène l'écran de
+  // connexion une seule fois par perte.
+  if (state.authLost && !lastAuthLost) {
+    if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send("auth:lost")
+    createWindow()
+  }
+  lastAuthLost = !!state.authLost
   if (mainWindow && !mainWindow.isDestroyed()) {
     mainWindow.webContents.send("sync:update", state)
   }
   if (tray) {
-    const active = state.items.filter((i) => i.status === "downloading")
+    const active = (state.items || []).filter((i) => i.status === "downloading")
+    const prefix = backend && backend.kind === "service" ? "PackSpace S3 Sync (service)" : "PackSpace S3 Sync"
     if (active.length === 0) {
-      tray.setToolTip(state.paused ? "PackSpace S3 Sync — en pause" : "PackSpace S3 Sync")
+      tray.setToolTip(state.paused ? `${prefix} — en pause` : prefix)
     } else {
       const totalSpeed = active.reduce((s, i) => s + (i.speed || 0), 0)
-      tray.setToolTip(
-        `PackSpace S3 Sync — ${active.length} fichier(s) en cours, ${(totalSpeed / 1048576).toFixed(1)} Mo/s`
-      )
+      tray.setToolTip(`${prefix} — ${active.length} fichier(s) en cours, ${(totalSpeed / 1048576).toFixed(1)} Mo/s`)
     }
   }
+}
+
+// ---------- backends ----------
+
+class LocalBackend {
+  constructor() {
+    this.kind = "local"
+    this.engine = new Engine({ onState: pushState })
+  }
+  start() {
+    this.engine.start()
+  }
+  call(method, args = []) {
+    return this.engine.call(method, args)
+  }
+  getState() {
+    return this.engine.getState()
+  }
+  async stop() {
+    await this.engine.stop()
+    await api.agentOffline().catch(() => {})
+  }
+}
+
+const SERVICE_POLL_MS = 1500
+
+class ServiceBackend {
+  constructor() {
+    this.kind = "service"
+    this.client = new ControlClient({ port: Number(store.get("controlPort")) || 47831, token: store.get("controlToken") })
+    this.timer = null
+    this.reachable = false
+    this.lastError = null
+    this.last = null
+  }
+  start() {
+    const tick = async () => {
+      try {
+        this.last = await this.client.state()
+        this.reachable = true
+        this.lastError = null
+        pushState(this.last)
+      } catch (err) {
+        this.reachable = false
+        this.lastError = err.message
+        pushState({ ...(this.last || { items: [], instances: [] }), serviceUnreachable: err.message })
+      }
+      this.timer = setTimeout(tick, SERVICE_POLL_MS)
+    }
+    tick()
+  }
+  async call(method, args = [], timeoutMs = 60000) {
+    // Le choix de dossier / l'ouverture d'un dossier restent côté fenêtre
+    // (dialogues natifs) ; tout le reste part au service.
+    const out = await this.client.call(method, args, timeoutMs)
+    if (["login", "logout", "addInstance", "updateInstance", "removeInstance", "resetInstance", "pause", "resume"].includes(method)) {
+      // Rafraîchit tout de suite plutôt que d'attendre le prochain tick.
+      this.client.state().then(pushState).catch(() => {})
+    }
+    return out
+  }
+  getState() {
+    return this.last || { items: [], instances: [] }
+  }
+  async stop() {
+    clearTimeout(this.timer)
+    // Le service continue : c'est tout l'intérêt du mode.
+  }
+}
+
+function startBackend() {
+  if (backend) backend.stop().catch(() => {})
+  backend = store.get("mode") === "service" ? new ServiceBackend() : new LocalBackend()
+  backend.start()
 }
 
 app.whenReady().then(() => {
   buildTray()
   createWindow()
-
-  sync = new SyncManager(pushState)
-  sync.start()
+  startBackend()
 
   if (store.get("autoLaunch")) {
     autoLauncher.isEnabled().then((enabled) => {
@@ -115,78 +208,66 @@ app.on("window-all-closed", (event) => {
 })
 
 app.on("before-quit", (event) => {
-  // Prévient le serveur (session arrêtée) avant de couper — best effort,
-  // 4 s max, puis on quitte vraiment.
-  if (sync && !app.__offlineSent) {
+  // Mode session : prévient le serveur (session arrêtée) avant de couper —
+  // best effort, 5 s max, puis on quitte vraiment. Mode service : rien à
+  // faire, le service continue.
+  if (backend && !app.__stopped) {
     event.preventDefault()
-    app.__offlineSent = true
-    sync.stop()
-    Promise.race([api.agentOffline(), new Promise((r) => setTimeout(r, 4000))]).finally(() => app.quit())
+    app.__stopped = true
+    Promise.race([backend.stop(), new Promise((r) => setTimeout(r, 5000))]).finally(() => app.quit())
   }
 })
 
 // --- IPC exposé au renderer via preload.js ---
 
-const SETTING_KEYS = [
-  "pollIntervalMs",
-  "maxParallelFiles",
-  "maxParallelChunks",
-  "chunkSizeMb",
-  "chunkThresholdMb",
-  "maxRetries",
-]
-
-function configSnapshot() {
-  const server = store.get("serverSettings") || {}
-  const out = {
-    serverUrl: store.get("serverUrl"),
-    userLabel: store.get("userLabel"),
-    autoLaunch: store.get("autoLaunch"),
-    isLoggedIn: !!store.get("token"),
-    agentId: store.get("agentId") || null,
-    agentLabel: store.get("agentLabel") || "",
-    hostname: api.HOSTNAME,
-  }
-  // Réglages : ceux du serveur (modifiables aussi depuis le B2B), repli
-  // sur les défauts locaux tant que le poste n'est pas enregistré.
-  for (const k of SETTING_KEYS) out[k] = server[k] ?? store.get(k)
-  return out
-}
-
 // Les erreurs axios portent tout l'objet réponse : on ne renvoie au
 // renderer qu'un message lisible (ipcMain.handle sérialise l'Error).
 function friendly(err) {
   const msg = err?.response?.data?.message || err?.message || "Erreur"
-  const e = new Error(msg)
-  return e
+  return new Error(msg)
+}
+
+const wrap = (fn) => async (...args) => {
+  try {
+    return await fn(...args)
+  } catch (err) {
+    throw friendly(err)
+  }
+}
+
+async function configSnapshot() {
+  const mode = store.get("mode") || "session"
+  let cfg = {}
+  let serviceUnreachable = null
+  try {
+    cfg = await backend.call("getConfig")
+  } catch (err) {
+    // Service injoignable : on montre quand même la fenêtre (avec le
+    // bandeau d'erreur) à partir de la config locale.
+    serviceUnreachable = err.message
+    cfg = {
+      serverUrl: store.get("serverUrl"),
+      userLabel: store.get("userLabel"),
+      isLoggedIn: !!store.get("token"),
+      agentLabel: store.get("agentLabel") || "",
+      hostname: api.HOSTNAME,
+    }
+    for (const k of Engine.SETTING_KEYS) cfg[k] = store.get(k)
+  }
+  return {
+    ...cfg,
+    autoLaunch: store.get("autoLaunch"),
+    mode,
+    serviceUnreachable,
+    serviceSupport: serviceInstaller.support(),
+  }
 }
 
 ipcMain.handle("config:get", () => configSnapshot())
-
-ipcMain.handle("config:setSettings", async (_e, partial) => {
-  const settings = {}
-  for (const k of SETTING_KEYS) {
-    if (partial && partial[k] !== undefined) {
-      const n = Number(partial[k])
-      if (Number.isFinite(n) && n >= 0) settings[k] = n
-    }
-  }
-  // Source de vérité = serveur (DesktopSyncController::update) ; l'agent
-  // recharge ensuite sa config. Sans agent enregistré, on garde en local.
-  const agentId = store.get("agentId")
-  if (agentId) {
-    try {
-      await api.updateAgentSettings(agentId, settings)
-      await sync.refreshConfig()
-    } catch (err) {
-      throw friendly(err)
-    }
-  } else {
-    for (const [k, v] of Object.entries(settings)) store.set(k, v)
-  }
-  if (sync) sync.dispatch()
+ipcMain.handle("config:setSettings", wrap(async (_e, partial) => {
+  await backend.call("setSettings", [partial])
   return configSnapshot()
-})
+}))
 
 ipcMain.handle("config:chooseDir", async () => {
   const res = await dialog.showOpenDialog(mainWindow, { properties: ["openDirectory", "createDirectory"] })
@@ -201,71 +282,87 @@ ipcMain.handle("config:setAutoLaunch", async (_e, enabled) => {
   return !!enabled
 })
 
-ipcMain.handle("auth:login", async (_e, { serverUrl, logon, password }) => {
-  try {
-    const data = await login(serverUrl, logon, password)
-    store.set("serverUrl", data.serverUrl || serverUrl)
-    store.set("token", data.token)
-    store.set("userLabel", `${data.first_name || ""} ${data.last_name || ""}`.trim() || data.logon)
-    if (sync) {
-      sync.registered = false
-      await sync.register()
-      sync.scanNow()
-    }
-    return { userLabel: store.get("userLabel"), agentLabel: store.get("agentLabel") }
-  } catch (err) {
-    throw friendly(err)
-  }
-})
+ipcMain.handle("auth:login", wrap(async (_e, payload) => {
+  const out = await backend.call("login", [payload], 90000)
+  lastAuthLost = false
+  return out
+}))
 
 ipcMain.handle("auth:ping", async (_e, serverUrl) => {
   try {
-    return await ping(serverUrl)
+    return await backend.call("ping", [serverUrl])
   } catch (err) {
     const status = err?.response?.status
     if (status === 404) throw new Error("L'API répond mais sans /ping : version API2 trop ancienne (redéployer).")
     if (err?.code === "ENOTFOUND") throw new Error("Nom de domaine introuvable (DNS).")
-    if (err?.code === "ECONNREFUSED") throw new Error("Connexion refusée : rien n'écoute à cette adresse.")
+    if (err?.code === "ECONNREFUSED" && backend.kind === "local") throw new Error("Connexion refusée : rien n'écoute à cette adresse.")
     if (err?.code === "ECONNABORTED") throw new Error("Délai dépassé : le serveur ne répond pas.")
     if (err?.code === "CERT_HAS_EXPIRED" || /certificate/i.test(err?.message || "")) throw new Error(`Certificat TLS invalide : ${err.message}`)
     throw friendly(err)
   }
 })
 
-ipcMain.handle("auth:logout", async () => {
-  await api.agentOffline()
-  if (sync) sync.registered = false
-  store.set("token", "")
-  store.set("userLabel", "")
-  store.set("agentId", null)
-})
+ipcMain.handle("auth:logout", wrap(() => backend.call("logout")))
 
-ipcMain.handle("s3:browse", async (_e, prefix) => {
-  try {
-    return await browse(prefix || "")
-  } catch (err) {
-    throw friendly(err)
+ipcMain.handle("s3:browse", wrap((_e, prefix) => backend.call("browse", [prefix || ""])))
+
+ipcMain.handle("inst:add", wrap((_e, payload) => backend.call("addInstance", [payload])))
+ipcMain.handle("inst:update", wrap((_e, id, patch) => backend.call("updateInstance", [id, patch])))
+ipcMain.handle("inst:remove", wrap((_e, id) => backend.call("removeInstance", [id])))
+ipcMain.handle("inst:reset", wrap((_e, id) => backend.call("resetInstance", [id])))
+ipcMain.handle("inst:openFolder", wrap(async (_e, id) => {
+  const dir = await backend.call("instanceDir", [id])
+  if (dir) shell.openPath(dir)
+}))
+
+ipcMain.handle("sync:state", () => (backend ? backend.getState() : { items: [], instances: [] }))
+ipcMain.handle("sync:scanNow", wrap(() => backend.call("scanNow")))
+ipcMain.handle("sync:retryFailed", wrap((_e, instanceId) => backend.call("retryFailed", [instanceId || null])))
+ipcMain.handle("sync:pause", wrap(() => backend.call("pause")))
+ipcMain.handle("sync:resume", wrap(() => backend.call("resume")))
+
+// ---------- mode service ----------
+
+ipcMain.handle("service:status", async () => {
+  const st = await serviceInstaller.status()
+  if (backend && backend.kind === "service") {
+    st.reachable = backend.reachable
+    st.error = backend.lastError
+  } else if (st.installed) {
+    // Installé mais la fenêtre est en mode session : on sonde quand même.
+    const probe = new ControlClient({ port: Number(store.get("controlPort")) || 47831, token: store.get("controlToken") })
+    st.reachable = await probe.health().then(() => true).catch(() => false)
   }
+  return st
 })
 
-const wrap = (fn) => async (...args) => {
-  try {
-    return await fn(...args)
-  } catch (err) {
-    throw friendly(err)
+ipcMain.handle("service:install", wrap(async () => {
+  // Arrêt propre du moteur local (les .part restent, le service reprend)
+  // puis copie de la config vers le dossier machine et installation.
+  if (backend && backend.kind === "local") {
+    await backend.engine.stop()
   }
-}
-ipcMain.handle("inst:add", wrap((_e, payload) => sync.addInstance(payload)))
-ipcMain.handle("inst:update", wrap((_e, id, patch) => sync.updateInstance(id, patch)))
-ipcMain.handle("inst:remove", wrap((_e, id) => sync.removeInstance(id)))
-ipcMain.handle("inst:reset", (_e, id) => sync.resetInstance(id))
-ipcMain.handle("inst:openFolder", (_e, id) => {
-  const inst = sync.instances().find((i) => i.id === id)
-  if (inst?.localDir) shell.openPath(inst.localDir)
-})
+  try {
+    await serviceInstaller.install()
+  } catch (err) {
+    // Échec (UAC refusé…) : on relance le moteur local, rien n'est perdu.
+    if (backend && backend.kind === "local") backend.engine.start()
+    throw err
+  }
+  // Le moteur local est déjà arrêté ; on ne signale PAS le poste hors
+  // ligne au serveur (le service reprend le même poste dans la foulée).
+  backend = null
+  lastAuthLost = false
+  startBackend()
+  return serviceInstaller.status()
+}))
 
-ipcMain.handle("sync:state", () => (sync ? sync.state() : { items: [], instances: [] }))
-ipcMain.handle("sync:scanNow", () => sync && sync.scanNow())
-ipcMain.handle("sync:retryFailed", (_e, instanceId) => sync && sync.retryFailed(instanceId || null))
-ipcMain.handle("sync:pause", () => sync && sync.pause())
-ipcMain.handle("sync:resume", () => sync && sync.resume())
+ipcMain.handle("service:uninstall", wrap(async () => {
+  if (backend && backend.kind === "service") await backend.stop()
+  try {
+    await serviceInstaller.uninstall()
+  } finally {
+    startBackend()
+  }
+  return serviceInstaller.status()
+}))

@@ -62,7 +62,11 @@ sessions, réglages) et les **erreurs**. Les commandes Pause / Reprendre /
 Vérifier / Réessayer / Re-vérifier sont exécutées par l'agent au heartbeat
 suivant.
 
-Le serveur (`DesktopSyncController`) est la source de vérité pour les
+Un poste est identifié par un **identifiant machine** (UUID généré au premier
+lancement, persisté dans la config de l'agent) : se déconnecter et se
+reconnecter — même avec un autre compte admin/opérateur — retrouve le même
+poste, ses dossiers et sa progression ; le B2B affiche simplement le dernier
+compte utilisé. Le serveur (`DesktopSyncController`) est la source de vérité pour les
 réglages et les instances ; l'agent ne garde en local que les manifestes,
 le jeton et un cache de la dernière config. Les instances créées dans une
 ancienne version de l'agent sont importées au premier enregistrement du
@@ -83,6 +87,57 @@ Adresse de l'API : l'hôte suffit (`/api` ajouté automatiquement), ex.
 (healthcheck public) et vérifie que les endpoints de synchro sont déployés.
 Fermer la fenêtre la masque seulement ;
 « Quitter » dans le menu du tray arrête réellement l'agent.
+
+## Mode service (l'agent tourne même session fermée)
+
+Par défaut l'agent tourne dans la fenêtre (mode **session**) : il s'arrête
+quand l'utilisateur ferme sa session Windows/macOS/Linux. Pour un poste
+d'atelier qui doit synchroniser en permanence, **Réglages → Mode service →
+« Installer le service »** :
+
+- le moteur de synchro est installé comme service de l'ordinateur (service
+  Windows via WinSW, unité systemd sur Linux, LaunchDaemon sur macOS),
+  démarrage automatique au boot, redémarrage automatique en cas de plantage,
+  **sans qu'aucun utilisateur ne soit connecté** ;
+- la fenêtre devient un simple client : elle pilote le service via une API
+  locale (`127.0.0.1:47831`, jeton partagé à l'installation, jamais exposée
+  sur le réseau) — connexion, instances, pause, réglages, avancement… tout
+  reste disponible, le badge « service » apparaît dans la barre du haut ;
+- la configuration courante (jeton API, identifiant du poste, instances,
+  fichiers déjà synchronisés) est **copiée** vers le dossier machine du
+  service : même poste côté B2B, rien n'est retéléchargé. À la
+  désinstallation, l'état est ramené dans la config utilisateur.
+
+Détails techniques : `src/service.js` est lancé par le gestionnaire de
+services avec `ELECTRON_RUN_AS_NODE=1` (le binaire Electron se comporte comme
+Node, pas de fenêtre) et `PACKSPACE_SYNC_DATA_DIR` pointant sur le dossier
+machine. Le B2B le voit comme n'importe quel agent (heartbeat, commandes,
+config). Voir `src/serviceInstaller.js`, `src/controlServer.js`,
+`src/controlClient.js`.
+
+| OS | Compte | Dossier de données / journal | Gestion manuelle |
+|----|--------|------------------------------|------------------|
+| Windows | Système local | `C:\ProgramData\PackSpace S3 Sync\` (`logs\service.log`, `daemon\` = WinSW) | `services.msc` → « PackSpace S3 Sync », ou `sc start packspaces3sync.exe` |
+| Linux (.deb) | root | `/var/lib/packspace-s3-sync/` | `systemctl status packspace-s3-sync`, `journalctl -u packspace-s3-sync` |
+| macOS | root | `/Library/Application Support/PackSpace S3 Sync/` | `sudo launchctl print system/ma.packspace.s3sync` |
+
+Points d'attention :
+
+- L'installation demande une élévation (UAC / pkexec / mot de passe admin).
+- Les dossiers de destination doivent être sur un **disque local** : un
+  lecteur réseau mappé (`Z:`) n'existe pas pour le compte Système. Utiliser
+  un chemin UNC accessible à la machine si besoin.
+- Sur Windows, si l'application est installée « pour moi seulement »
+  (`%LocalAppData%\Programs`), le service exécute le binaire depuis ce
+  dossier : préférer l'installation « pour tous les utilisateurs ».
+- Linux : le mode service nécessite le paquet `.deb` (chemin stable) ; avec
+  l'AppImage le bouton est désactivé.
+- Mettre à jour l'application : installer la nouvelle version par-dessus,
+  puis redémarrer le service (Réglages → Désinstaller puis Installer, ou via
+  le gestionnaire de services). Le service réutilise le même binaire.
+- Le jeton de contrôle est dans la config des deux côtés (`controlToken`) ;
+  si la fenêtre affiche « actif, injoignable », désinstaller puis réinstaller
+  resynchronise les deux configs.
 
 ## Réglages (bouton « Réglages »)
 
@@ -159,6 +214,8 @@ Remplacer `build/icon.png` (512×512 ou 1024×1024) avant de packager.
 4. Le poste apparaît « En ligne » dans le B2B ; y ajouter les dossiers à
    synchroniser (ou depuis l'agent).
 5. L'agent démarre avec la session et vit dans la zone de notification.
+6. Pour qu'il tourne même session fermée : Réglages → Mode service →
+   « Installer le service » (voir section dédiée).
 
 Pour supprimer les avertissements de sécurité : certificat de signature
 Windows (OV/EV) et Apple Developer ID + notarization, à brancher via les
@@ -167,8 +224,11 @@ dans le workflow.
 
 ## Config locale
 
-`electron-store` → fichier JSON dans le dossier de données de l'app :
-adresse API, jeton agent, instances, manifestes, réglages, démarrage auto.
+Fichier JSON `packspace-s3-sync-config.json` (lib `conf`) : adresse API,
+jeton agent, identifiant machine, instances, manifestes, réglages, démarrage
+auto, mode (session/service) et jeton de contrôle. Emplacement : dossier de
+données utilisateur d'Electron en mode session, dossier machine (voir tableau
+du mode service) pour le service.
 
 ## Limites connues
 

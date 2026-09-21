@@ -86,6 +86,7 @@ async function streamToFile(url, rangeHeader, filePath, appendFrom, onData) {
     appendFrom = 0
   }
   const writer = fs.createWriteStream(filePath, { flags: appendFrom > 0 ? "a" : "w" })
+  res.data.__writer = writer
   current.streams.add(res.data)
   try {
     await new Promise((resolve, reject) => {
@@ -240,10 +241,18 @@ parentPort.on("message", (msg) => {
   if (msg?.type === "start") {
     run(msg.job)
   } else if (msg?.type === "cancel" && current) {
+    // Annulation propre : on coupe la LECTURE réseau (unpipe + destroy) mais
+    // on laisse le flux d'ÉCRITURE se terminer (writer.end()) pour que tout
+    // ce qui a déjà été reçu soit bien sur disque — c'est ce qui permet la
+    // reprise exacte à l'octet près au prochain lancement (la taille du
+    // .part / part-N sur disque = offset de reprise).
     current.cancelled = true
     for (const s of current.streams) {
       try {
+        const writer = s.__writer
+        s.unpipe()
         s.destroy(new Error("Annulé"))
+        if (writer && !writer.writableEnded) writer.end()
       } catch {
         // ignore
       }

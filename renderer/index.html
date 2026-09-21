@@ -9,10 +9,14 @@
   <header class="topbar">
     <span class="brand">PackSpace S3 Sync</span>
     <span class="topbar-right">
+      <span id="modeBadge" class="mode-badge hidden" title="L'agent tourne comme service : il continue même session fermée">service</span>
       <span id="globalStatus" class="global-status"></span>
       <span id="userLabel" class="user-label"></span>
     </span>
   </header>
+
+  <!-- Mode service : le service ne répond pas -->
+  <div id="serviceBanner" class="service-banner hidden"></div>
 
   <!-- ---------- Connexion ---------- -->
   <section id="loginView" class="view login">
@@ -83,6 +87,8 @@
         <input id="instLocalDir" type="text" readonly placeholder="Choisir un dossier…" />
         <button id="instChooseDirBtn" class="small">Choisir…</button>
       </div>
+      <label class="check"><input type="checkbox" id="instDeleteRemoved" /> Supprimer localement les fichiers retirés de la source S3</label>
+      <p class="hint">Désactivé : un fichier supprimé dans S3 reste sur le poste. Activé : il est aussi supprimé du dossier local (uniquement les fichiers synchronisés par l'agent).</p>
       <p id="instError" class="error"></p>
       <div class="modal-actions">
         <button id="instCancelBtn" class="small ghost">Annuler</button>
@@ -106,6 +112,23 @@
       <div class="row">
         <span class="lbl">Démarrer avec l'ordinateur</span>
         <label class="switch"><input type="checkbox" id="autoLaunchToggle" /><span class="slider"></span></label>
+      </div>
+
+      <!-- Mode service : l'agent continue même session fermée -->
+      <div class="service-box">
+        <div class="row" style="padding-top:0">
+          <span>
+            <strong>Mode service</strong>
+            <span id="serviceBadge" class="badge"></span>
+            <div class="hint">L'agent tourne comme service de l'ordinateur : il continue à synchroniser même quand la session est fermée ou qu'aucun utilisateur n'est connecté. Cette fenêtre sert alors uniquement à le piloter.</div>
+          </span>
+        </div>
+        <div id="serviceInfo" class="hint" style="margin-top:6px"></div>
+        <div class="modal-actions" style="margin-top:8px">
+          <button id="serviceRefreshBtn" class="small ghost">Actualiser</button>
+          <button id="serviceInstallBtn" class="small primary">Installer le service</button>
+          <button id="serviceUninstallBtn" class="small danger hidden">Désinstaller le service</button>
+        </div>
       </div>
       <div class="modal-actions">
         <button id="settingsCloseBtn" class="small ghost">Fermer</button>

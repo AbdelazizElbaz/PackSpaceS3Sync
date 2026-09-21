@@ -1,4 +1,5 @@
 const path = require("path")
+const fs = require("fs")
 const { Worker } = require("worker_threads")
 const store = require("./store")
 const api = require("./api")
@@ -40,6 +41,11 @@ class SyncManager {
     this.serverError = null
     this.configVersion = 0
     this.eventQueue = []
+    // Passe à true quand API2 répond 401 (jeton agent révoqué : poste
+    // supprimé depuis le B2B, ou jeton expiré). main.js efface alors le
+    // jeton et ramène l'écran de connexion — l'agent ne se ré-enregistre
+    // pas tout seul.
+    this.authLost = false
   }
 
   // ---------- config serveur (avec cache local) ----------
@@ -69,6 +75,7 @@ class SyncManager {
       prefix: String(i.prefix || "").replace(/^\/+|\/+$/g, ""),
       localDir: i.localDir,
       enabled: i.enabled !== false,
+      deleteRemoved: i.deleteRemoved === true,
     }))
     const known = new Set(list.map((i) => i.id))
     // Instances supprimées côté serveur : on abandonne leurs jobs en cours.
@@ -104,6 +111,7 @@ class SyncManager {
     } catch (err) {
       this.registered = false
       this.serverError = describe(err)
+      if (err?.response?.status === 401) this.authLost = true
       this.emit()
       return false
     }
@@ -122,7 +130,7 @@ class SyncManager {
 
   // ---------- instances (écritures → serveur, puis rechargement) ----------
 
-  async addInstance({ name, prefix, localDir }) {
+  async addInstance({ name, prefix, localDir, deleteRemoved = false }) {
     const agentId = store.get("agentId")
     if (!agentId) throw new Error("Agent non enregistré auprès du serveur.")
     await api.createInstance(agentId, {
@@ -130,6 +138,7 @@ class SyncManager {
       prefix: String(prefix).replace(/^\/+|\/+$/g, ""),
       localDir,
       enabled: true,
+      deleteRemoved: !!deleteRemoved,
     })
     await this.refreshConfig()
     this.scanNow()
@@ -210,6 +219,7 @@ class SyncManager {
       paused: this.paused,
       scanning: this.scanning,
       registered: this.registered,
+      authLost: this.authLost,
       serverError: this.serverError,
       agentLabel: store.get("agentLabel") || "",
       hostname: api.HOSTNAME,
@@ -228,16 +238,57 @@ class SyncManager {
   // ---------- cycle de vie ----------
 
   start() {
+    this.authLost = false
     if (this.polling) return
     this.polling = true
     this.pollLoop()
   }
 
-  stop() {
+  // Arrêt (fermeture de l'app ou déconnexion). Les téléchargements en
+  // cours sont interrompus PROPREMENT : on demande à chaque worker
+  // d'annuler et on lui laisse jusqu'à `graceMs` pour fermer ses flux et
+  // vider ses buffers disque, avant de le tuer. Les fichiers partiels
+  // (.part / .chunks/part-N) restent en place : au prochain démarrage le
+  // scan remet le fichier en file et le worker REPREND à l'octet où il
+  // s'était arrêté (voir workers/downloadWorker.js) — les manifestes
+  // (fichiers déjà terminés) sont persistés dans electron-store et ne sont
+  // jamais perdus. Sur demande : "quand je me déconnecte de l'agent ou le
+  // ferme, et le relance, il doit reprendre depuis l'endroit où il en est".
+  async stop(graceMs = 1500) {
     this.polling = false
     clearTimeout(this.pollTimer)
     clearTimeout(this.wakeTimer)
+    clearTimeout(this.flushTimer)
+    const workers = Array.from(this.workers.entries()).filter(([, w]) => w)
+    for (const [, w] of workers) {
+      try {
+        w.postMessage({ type: "cancel" })
+      } catch {
+        // ignore
+      }
+    }
+    await Promise.all(
+      workers.map(
+        ([, w]) =>
+          new Promise((resolve) => {
+            const t = setTimeout(resolve, graceMs)
+            w.once("exit", () => {
+              clearTimeout(t)
+              resolve()
+            })
+          })
+      )
+    )
     for (const k of Array.from(this.workers.keys())) this.terminateWorker(k)
+    // Les items "downloading" repassent en attente pour l'état affiché
+    // (ils seront de toute façon reconstruits au prochain scan).
+    for (const item of this.items.values()) {
+      if (item.status === "downloading") {
+        item.status = "queued"
+        item.speed = 0
+      }
+    }
+    this.emit()
   }
 
   pause() {
@@ -313,6 +364,7 @@ class SyncManager {
         } catch (err) {
           this.serverError = describe(err)
           if (err?.response?.status === 404) this.registered = false
+          if (err?.response?.status === 401) this.authLost = true
         }
 
         // 3. scans
@@ -377,6 +429,7 @@ class SyncManager {
           startedAt: 0,
         })
       }
+      this.reconcileRemoved(inst, manifest, objects)
       this.instanceStats.set(inst.id, { ...stats, lastScanAt: Date.now(), lastError: null, total: objects.length, synced })
     } catch (err) {
       const msg = describe(err)
@@ -389,6 +442,53 @@ class SyncManager {
       }
     }
     this.emit()
+  }
+
+  // Fichiers présents dans le manifeste (donc synchronisés par NOUS) mais
+  // qui ont disparu du dossier S3 source. Deux comportements selon l'option
+  // "deleteRemoved" de l'instance (réglable dans l'agent et le B2B) :
+  //  - true  : suppression du fichier local (+ .part/.chunks résiduels) et
+  //            des dossiers parents devenus vides, jusqu'au dossier de
+  //            l'instance ; événement file_removed dans l'historique.
+  //  - false : le fichier local est conservé ; on retire seulement l'entrée
+  //            du manifeste pour qu'un retour du fichier dans S3 déclenche
+  //            une nouvelle synchro.
+  // Les fichiers déposés à la main dans le dossier local (jamais dans le
+  // manifeste) ne sont jamais touchés.
+  reconcileRemoved(inst, manifest, objects) {
+    const present = new Set(objects.map((o) => o.key))
+    const gone = Object.keys(manifest).filter((k) => !present.has(k))
+    if (!gone.length) return
+    const all = store.get("manifests") || {}
+    const m = all[inst.id] || {}
+    const prefix = inst.prefix.replace(/\/+$/, "") + "/"
+    for (const key of gone) {
+      delete m[key]
+      if (!inst.deleteRemoved) continue
+      const relative = key.startsWith(prefix) ? key.slice(prefix.length) : path.basename(key)
+      const dest = path.join(inst.localDir, ...relative.split("/").filter(Boolean).map(sanitize))
+      let removed = false
+      for (const p of [dest, `${dest}.part`]) {
+        try {
+          fs.unlinkSync(p)
+          removed = removed || p === dest
+        } catch {
+          // absent : rien à faire
+        }
+      }
+      fs.rmSync(`${dest}.chunks`, { recursive: true, force: true })
+      pruneEmptyDirs(path.dirname(dest), inst.localDir)
+      this.queueEvent({
+        type: "file_removed",
+        level: "info",
+        instance_id: inst.id,
+        s3_key: key,
+        message: removed ? `Supprimé localement (retiré de la source) : ${relative}` : `Retiré de la source (déjà absent localement) : ${relative}`,
+        meta: { local_path: dest, order_id: orderIdFromKey(key) },
+      })
+    }
+    all[inst.id] = m
+    store.set("manifests", all)
   }
 
   // ---------- pool ----------
@@ -583,6 +683,22 @@ function orderIdFromKey(key) {
   const parts = String(key || "").split("/").filter(Boolean)
   const seg = parts.length >= 2 ? parts[parts.length - 2] : ""
   return /^\d+$/.test(seg) ? Number(seg) : null
+}
+
+// Remonte depuis `dir` en supprimant les dossiers vides, sans jamais
+// dépasser `root` (le dossier local de l'instance) ni le supprimer.
+function pruneEmptyDirs(dir, root) {
+  const stop = path.resolve(root)
+  let cur = path.resolve(dir)
+  while (cur.startsWith(stop) && cur !== stop) {
+    try {
+      if (fs.readdirSync(cur).length > 0) break
+      fs.rmdirSync(cur)
+    } catch {
+      break
+    }
+    cur = path.dirname(cur)
+  }
 }
 
 function sanitize(segment) {

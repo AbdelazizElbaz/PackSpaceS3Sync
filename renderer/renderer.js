@@ -116,6 +116,7 @@ function renderInstances(state) {
             <span class="muted mono">${esc(i.prefix)}</span>
           </div>
           <div class="inst-actions">
+            <label class="toggle-del" title="Supprimer localement les fichiers retirés de la source S3"><input type="checkbox" data-act="delrm" data-id="${i.id}" ${i.deleteRemoved ? "checked" : ""}/> Suppr. source</label>
             <button class="small" data-act="toggle" data-id="${i.id}">${i.enabled ? "Désactiver" : "Activer"}</button>
             <button class="small" data-act="open" data-id="${i.id}">Dossier</button>
             <button class="small" data-act="retry" data-id="${i.id}" ${i.failed ? "" : "disabled"}>Réessayer (${i.failed})</button>
@@ -134,10 +135,21 @@ function renderInstances(state) {
     })
     .join("")
 
+  box.querySelectorAll("input[data-act='delrm']").forEach((c) =>
+    c.addEventListener("change", async () => {
+      try {
+        await window.agent.updateInstance(Number(c.dataset.id), { deleteRemoved: c.checked })
+      } catch (e) {
+        alert(e?.message || "Impossible de modifier l'option.")
+        c.checked = !c.checked
+      }
+    })
+  )
   box.querySelectorAll("button[data-act]").forEach((b) =>
     b.addEventListener("click", async () => {
-      const id = b.dataset.id
-      const inst = list.find((x) => x.id === id)
+      // Les ids d'instances viennent du serveur (nombres) ; dataset est une chaîne.
+      const id = Number(b.dataset.id)
+      const inst = list.find((x) => Number(x.id) === id)
       switch (b.dataset.act) {
         case "toggle":
           await window.agent.updateInstance(id, { enabled: !inst.enabled })
@@ -217,6 +229,7 @@ function render(state) {
   if (!state) return
   const prev = syncedPrefixes()
   lastState = state
+  renderServiceBanner(state.serviceUnreachable || null)
   renderInstances(state)
   renderFiles(state)
   // Les badges "synchronisé" de l'explorateur dépendent des instances.
@@ -226,8 +239,20 @@ function render(state) {
 
 // ---------- config / login ----------
 
+function renderServiceBanner(message) {
+  const b = $("serviceBanner")
+  if (message) {
+    b.textContent = `⚠ Service injoignable : ${message} — ouvrez Réglages → Mode service pour vérifier son état.`
+    b.classList.remove("hidden")
+  } else {
+    b.classList.add("hidden")
+  }
+}
+
 async function refreshConfig() {
   const c = await window.agent.getConfig()
+  $("modeBadge").classList.toggle("hidden", c.mode !== "service")
+  renderServiceBanner(c.serviceUnreachable)
   if (c.isLoggedIn) {
     $("loginView").classList.add("hidden")
     $("mainView").classList.remove("hidden")
@@ -299,6 +324,7 @@ $("createInstanceBtn").addEventListener("click", () => {
   $("instPrefix").value = currentPrefix
   $("instName").value = currentPrefix.split("/").filter(Boolean).slice(-2).join(" / ")
   $("instLocalDir").value = ""
+  $("instDeleteRemoved").checked = false
   $("instError").textContent = ""
   $("instanceDialog").classList.remove("hidden")
 })
@@ -320,7 +346,7 @@ $("instSaveBtn").addEventListener("click", async () => {
     return
   }
   try {
-    await window.agent.addInstance({ name, prefix, localDir })
+    await window.agent.addInstance({ name, prefix, localDir, deleteRemoved: $("instDeleteRemoved").checked })
     $("instanceDialog").classList.add("hidden")
   } catch (e) {
     $("instError").textContent = e?.message || "Impossible de créer l'instance."
@@ -344,6 +370,104 @@ $("saveSettingsBtn").addEventListener("click", async () => {
 })
 $("autoLaunchToggle").addEventListener("change", (e) => window.agent.setAutoLaunch(e.target.checked))
 
+// ---------- mode service ----------
+
+async function refreshServiceStatus() {
+  const badge = $("serviceBadge")
+  const info = $("serviceInfo")
+  const installBtn = $("serviceInstallBtn")
+  const uninstallBtn = $("serviceUninstallBtn")
+  try {
+    const s = await window.agent.serviceStatus()
+    if (!s.supported) {
+      badge.textContent = "indisponible"
+      badge.className = "badge off"
+      info.textContent = s.reason || ""
+      installBtn.classList.add("hidden")
+      uninstallBtn.classList.add("hidden")
+      return
+    }
+    if (!s.installed) {
+      badge.textContent = "non installé"
+      badge.className = "badge off"
+      info.textContent = `L'agent tourne dans cette fenêtre (mode session). Données du service : ${s.dataDir}`
+      installBtn.classList.remove("hidden")
+      uninstallBtn.classList.add("hidden")
+      return
+    }
+    installBtn.classList.add("hidden")
+    uninstallBtn.classList.remove("hidden")
+    if (s.running && s.reachable !== false) {
+      badge.textContent = "actif"
+      badge.className = "badge"
+      info.textContent = `Service installé et en cours d'exécution — il continue même session fermée. Données : ${s.dataDir}`
+    } else if (s.running) {
+      badge.textContent = "actif, injoignable"
+      badge.className = "badge warn"
+      info.textContent = `Le service tourne mais ne répond pas sur l'API locale (${s.error || "jeton de contrôle différent ?"}). Désinstallez puis réinstallez pour resynchroniser la configuration.`
+    } else {
+      badge.textContent = "arrêté"
+      badge.className = "badge err"
+      info.textContent = `Le service est installé mais arrêté. Démarrez-le depuis le gestionnaire de services (voir README) ou désinstallez-le pour repasser en mode session. Journal : ${s.dataDir}/logs/service.log`
+    }
+  } catch (e) {
+    badge.textContent = "erreur"
+    badge.className = "badge err"
+    info.textContent = e?.message || "Impossible de lire l'état du service."
+  }
+}
+
+$("serviceRefreshBtn").addEventListener("click", refreshServiceStatus)
+$("settingsBtn").addEventListener("click", refreshServiceStatus)
+
+$("serviceInstallBtn").addEventListener("click", async () => {
+  if (
+    !confirm(
+      "Installer PackSpace S3 Sync comme service de l'ordinateur ?\n\n" +
+        "• L'agent continuera à synchroniser même session fermée.\n" +
+        "• Une élévation (administrateur) va être demandée.\n" +
+        "• La configuration actuelle (connexion, instances, fichiers déjà synchronisés) est reprise par le service : rien n'est retéléchargé.\n" +
+        "• Les dossiers de destination doivent être sur un disque local (pas de lecteur réseau mappé)."
+    )
+  )
+    return
+  const btn = $("serviceInstallBtn")
+  btn.disabled = true
+  btn.textContent = "Installation…"
+  try {
+    await window.agent.serviceInstall()
+    await refreshConfig()
+    await refreshServiceStatus()
+  } catch (e) {
+    alert(e?.message || "Installation du service impossible.")
+  } finally {
+    btn.disabled = false
+    btn.textContent = "Installer le service"
+  }
+})
+
+$("serviceUninstallBtn").addEventListener("click", async () => {
+  if (
+    !confirm(
+      "Désinstaller le service ?\n\nL'agent repassera en mode session (il ne tournera que quand cette application est ouverte). L'état du service (connexion, fichiers synchronisés) est ramené dans cette fenêtre."
+    )
+  )
+    return
+  const btn = $("serviceUninstallBtn")
+  btn.disabled = true
+  btn.textContent = "Désinstallation…"
+  try {
+    await window.agent.serviceUninstall()
+    await refreshConfig()
+    await refreshServiceStatus()
+  } catch (e) {
+    alert(e?.message || "Désinstallation du service impossible.")
+  } finally {
+    btn.disabled = false
+    btn.textContent = "Désinstaller le service"
+  }
+})
+
 // ---------- synchro : actions globales ----------
 
 $("scanNowBtn").addEventListener("click", () => window.agent.scanNow())
@@ -355,5 +479,9 @@ $("pauseBtn").addEventListener("click", async () => {
 // ---------- init ----------
 
 window.agent.onStateUpdate(render)
+window.agent.onAuthLost(async () => {
+  await refreshConfig()
+  $("loginError").textContent = "Session terminée : ce poste a été supprimé depuis Packspace ou le jeton a expiré. Reconnectez-vous."
+})
 refreshConfig()
 window.agent.getState().then(render)
