@@ -5,12 +5,16 @@
 #
 # Déclencheurs :
 #   - tag `vX.Y.Z` poussé (git tag v1.0.0 && git push --tags) → version = tag
-#   - workflow_dispatch → version = champ saisi (ex 1.0.1)
+#   - workflow_dispatch → version saisie (sinon celle de package.json)
 #
-# Secrets / variables à définir dans CE dépôt (Settings → Secrets and
-# variables → Actions), mêmes valeurs que le monorepo Packspace :
+# Environnement GitHub **Prod** (Settings → Environments → Prod, déjà créé) :
+# le job `publish` s'exécute dans cet environnement et y lit
 #   secrets.AWS_ACCESS_KEY_ID, secrets.AWS_SECRET_ACCESS_KEY
-#   vars.AWS_REGION, vars.AWS_BUCKET  (bucket principal API2)
+#   vars.AWS_REGION, vars.AWS_BUCKET  (bucket principal de l'API2 Prod)
+# Activer "Required reviewers" sur Prod impose une validation manuelle avant
+# l'envoi vers S3 (le build, lui, tourne sans attendre). Pour publier aussi
+# sur Dev/Accept plus tard : créer l'environnement du même nom avec ses
+# propres secrets/variables et le passer dans ENVIRONMENT ci-dessous.
 #
 # Arborescence produite dans le bucket :
 #   desktop-agent/releases/<version>/PackSpace-S3-Sync-<version>-win-x64.exe
@@ -35,11 +39,14 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: "Version (ex 1.0.1) — écrite dans package.json avant le build"
-        required: true
+        description: "Version (ex 1.0.1) — laisser vide pour prendre celle de package.json"
+        required: false
 
 permissions:
   contents: read
+
+env:
+  ENVIRONMENT: Prod
 
 jobs:
   build:
@@ -73,6 +80,7 @@ jobs:
         run: |
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
             V="${{ github.event.inputs.version }}"
+            [ -n "$V" ] || V="$(node -p "require('./package.json').version")"
           else
             V="${GITHUB_REF_NAME#v}"
           fi
@@ -94,9 +102,23 @@ jobs:
           path: ${{ matrix.glob }}
           if-no-files-found: error
 
+      # La version résolue est transmise au job publish via un artefact
+      # (les outputs d'un job en matrice ne sont pas fiables).
+      - if: matrix.os == 'ubuntu-latest'
+        shell: bash
+        run: echo -n "${{ steps.v.outputs.version }}" > VERSION
+      - if: matrix.os == 'ubuntu-latest'
+        uses: actions/upload-artifact@v4
+        with:
+          name: version
+          path: VERSION
+
   publish:
     needs: build
     runs-on: ubuntu-latest
+    # Secrets/variables AWS lus dans l'environnement GitHub "Prod" (voir
+    # en-tête) ; "Required reviewers" sur cet environnement bloque ici.
+    environment: Prod
     steps:
       - uses: actions/download-artifact@v4
         with:
@@ -114,13 +136,11 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            V="${{ github.event.inputs.version }}"
-          else
-            V="${GITHUB_REF_NAME#v}"
-          fi
+          V="$(cat dist/VERSION)"
+          rm -f dist/VERSION
           BUCKET="${{ vars.AWS_BUCKET }}"
           PREFIX="desktop-agent/releases/$V"
+          echo "Publication de la version $V sur l'environnement Prod (bucket $BUCKET, région ${{ vars.AWS_REGION }})"
           ls -la dist
 
           # Manifeste consommé par API2 : un objet par plateforme/arch.

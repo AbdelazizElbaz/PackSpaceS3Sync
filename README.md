@@ -112,21 +112,23 @@ Ils prennent effet immédiatement, sans redémarrage.
 La publication est automatisée par `.github/workflows/release.yml` :
 
 ```bash
-# 1. bumper la version et pousser un tag
 npm version 1.0.1            # met à jour package.json + crée le tag v1.0.1
-git push && git push --tags  # déclenche le workflow "Release"
+git push && git push --tags  # déclenche "Release"
 ```
+
+Ou bien onglet Actions → « Release » → *Run workflow* (version optionnelle,
+sinon celle de `package.json`). Le job de publication s'exécute dans
+l'**environnement GitHub `Prod`** (Settings → Environments → Prod) et y lit
+les secrets `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` et les variables
+`AWS_REGION` / `AWS_BUCKET` — mêmes valeurs que l'environnement Prod du
+monorepo. Activez « Required reviewers » sur cet environnement pour exiger
+votre validation avant l'envoi vers S3 (les builds tournent sans attendre).
 
 Le workflow construit sur trois runners (`windows-latest`, `macos-latest`,
 `ubuntu-latest`) les installeurs `PackSpace-S3-Sync-<version>-win-x64.exe`,
 `…-mac-arm64.dmg`, `…-mac-x64.dmg`, `…-linux-x64.AppImage`, `…-linux-x64.deb`,
 puis les envoie dans le bucket S3 principal sous
 `desktop-agent/releases/<version>/` et écrit `desktop-agent/latest.json`.
-(Alternative : onglet Actions → « Release » → *Run workflow* avec la version.)
-
-Secrets/variables à définir dans ce dépôt GitHub (mêmes valeurs que le
-monorepo) : `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY` (secrets),
-`AWS_REGION`, `AWS_BUCKET` (variables).
 
 Côté B2B, la page **Paramètres → Synchro impression** lit `latest.json` via
 `GET /desktop/sync/releases` (API2, staff uniquement) et affiche une carte
