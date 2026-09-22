@@ -176,7 +176,11 @@ jobs:
   #   ghcr.io/<owner>/packspace-s3-sync:<version>  et  :latest
   # Indépendant de S3/Prod : utilise GITHUB_TOKEN (permission packages:write).
   # Multi-arch : amd64 (la plupart des NAS Synology) + arm64 (modèles ARM).
+  # DÉSACTIVÉ (sur demande : "désactive packaging docker dans pipeline
+  # sync") — pour le réactiver, remplacer `if: false` par `if: true` ou
+  # supprimer la ligne.
   docker:
+    if: false
     needs: build
     runs-on: ubuntu-latest
     permissions:

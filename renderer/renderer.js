@@ -225,11 +225,56 @@ function renderFiles(state) {
     .join("")
 }
 
+// Fenêtre de progression de la mise à jour (state.updateProgress, alimenté
+// par selfUpdater.js en mode session comme en mode service).
+const fmtMb = (b) => `${(Number(b || 0) / 1048576).toFixed(1)} Mo`
+function renderUpdateProgress(p) {
+  const dlg = $("updateProgressDialog")
+  if (!dlg) return
+  if (!p || (!p.active && p.phase !== "error" && p.phase !== "restart")) {
+    dlg.classList.add("hidden")
+    return
+  }
+  dlg.classList.remove("hidden")
+  const bar = $("updateProgressBar")
+  const closeBtn = $("updateProgressCloseBtn")
+  closeBtn.classList.add("hidden")
+  bar.classList.remove("indeterminate")
+  $("updateProgressTitle").textContent = p.version ? `Mise à jour vers v${p.version}` : "Mise à jour en cours"
+  if (p.phase === "download") {
+    $("updateProgressPhase").textContent = "Téléchargement de la nouvelle version…"
+    if (p.percent == null) {
+      bar.classList.add("indeterminate")
+      $("updateProgressDetail").textContent = fmtMb(p.received)
+    } else {
+      bar.style.width = `${p.percent}%`
+      $("updateProgressDetail").textContent = `${p.percent} % — ${fmtMb(p.received)} / ${fmtMb(p.total)}`
+    }
+  } else if (p.phase === "install") {
+    bar.style.width = "100%"
+    bar.classList.add("indeterminate")
+    $("updateProgressPhase").textContent = "Installation silencieuse en cours… (connexion et réglages conservés)"
+    $("updateProgressDetail").textContent = ""
+  } else if (p.phase === "restart") {
+    bar.style.width = "100%"
+    $("updateProgressPhase").textContent = "Installation terminée — l'application redémarre dans quelques secondes."
+    $("updateProgressDetail").textContent = ""
+  } else if (p.phase === "error") {
+    bar.style.width = "100%"
+    bar.style.background = "#dc2626"
+    $("updateProgressPhase").textContent = "La mise à jour a échoué."
+    $("updateProgressDetail").textContent = p.message || ""
+    closeBtn.classList.remove("hidden")
+  }
+}
+$("updateProgressCloseBtn")?.addEventListener("click", () => $("updateProgressDialog").classList.add("hidden"))
+
 function render(state) {
   if (!state) return
   const prev = syncedPrefixes()
   lastState = state
   renderServiceBanner(state.serviceUnreachable || null)
+  renderUpdateProgress(state.updateProgress || null)
   renderInstances(state)
   renderFiles(state)
   // Les badges "synchronisé" de l'explorateur dépendent des instances.
@@ -567,13 +612,14 @@ $("updateApplyBtn").addEventListener("click", async () => {
   const btn = $("updateApplyBtn")
   btn.disabled = true
   btn.textContent = "Téléchargement…"
+  renderUpdateProgress({ active: true, phase: "download", percent: null, received: 0, version: updateInfo?.version })
   try {
     await window.agent.applyUpdate()
     $("updateBannerText").textContent = "Mise à jour en cours — l'application redémarre dans quelques secondes."
     btn.classList.add("hidden")
     $("updateDismissBtn").classList.add("hidden")
   } catch (e) {
-    alert(e?.message || "Mise à jour impossible.")
+    renderUpdateProgress({ active: false, phase: "error", message: e?.message || "Mise à jour impossible.", version: updateInfo?.version })
     btn.disabled = false
     btn.textContent = "Mettre à jour maintenant"
   }

@@ -226,6 +226,8 @@ class SyncManager {
       activeWorkers: this.workers.size,
       totalSpeed: active.reduce((s, i) => s + (i.speed || 0), 0),
       maxParallelFiles: this.setting("maxParallelFiles", 4),
+      // Progression d'une mise à jour en cours (voir selfUpdater.js)
+      updateProgress: require("./selfUpdater").getUpdateProgress(),
       instances,
       items,
     }
@@ -357,7 +359,10 @@ class SyncManager {
     this._updating = true
     this.queueEvent({ type: "update_started", level: "info", message: "Mise à jour demandée." })
     require("./selfUpdater")
-      .applyUpdate({ log: (level, message) => this.queueEvent({ type: level === "error" ? "update_failed" : "update_started", level, message }) })
+      .applyUpdate({
+        log: (level, message) => this.queueEvent({ type: level === "error" ? "update_failed" : "update_started", level, message }),
+        onProgress: () => this.emit(),
+      })
       .then((r) => {
         this._updating = false
         if (r?.applied) {

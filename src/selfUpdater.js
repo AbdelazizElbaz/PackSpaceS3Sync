@@ -49,8 +49,31 @@ function isContainer() {
   return !process.versions.electron
 }
 
-async function downloadTo(url, destPath) {
+// Progression de la mise à jour en cours, lue par SyncManager.state()
+// (donc visible par la fenêtre en mode session ET en mode service, via
+// l'API de contrôle) — sur demande : "pendant la mise à jour on doit
+// afficher une fenêtre de progression".
+//   { active, phase: 'download'|'install'|'restart'|'error'|'done',
+//     percent, received, total, version, message, updatedAt }
+let currentProgress = null
+let progressListener = null
+function setProgress(patch) {
+  currentProgress = { ...(currentProgress || {}), ...patch, updatedAt: Date.now() }
+  try {
+    progressListener?.(currentProgress)
+  } catch {
+    /* ignore */
+  }
+}
+function getUpdateProgress() {
+  return currentProgress
+}
+
+async function downloadTo(url, destPath, onProgress = () => {}) {
   const res = await axios.get(url, { responseType: "stream", timeout: 180000 })
+  const total = Number(res.headers["content-length"] || 0)
+  let received = 0
+  let lastTick = 0
   await new Promise((resolve, reject) => {
     const w = fs.createWriteStream(destPath)
     let settled = false
@@ -59,9 +82,20 @@ async function downloadTo(url, destPath) {
       settled = true
       err ? reject(err) : resolve()
     }
+    res.data.on("data", (chunk) => {
+      received += chunk.length
+      const now = Date.now()
+      if (now - lastTick > 200) {
+        lastTick = now
+        onProgress({ received, total, percent: total > 0 ? Math.min(99, Math.floor((received / total) * 100)) : null })
+      }
+    })
     res.data.on("error", done)
     w.on("error", done)
-    w.on("finish", () => done())
+    w.on("finish", () => {
+      onProgress({ received, total, percent: 100 })
+      done()
+    })
     res.data.pipe(w)
   })
 }
@@ -136,7 +170,17 @@ function installSilentlyForSession(file, asset) {
   child.unref()
 }
 
-async function applyUpdate({ log = () => {} } = {}) {
+async function applyUpdate({ log = () => {}, onProgress = null } = {}) {
+  progressListener = onProgress
+  try {
+    return await applyUpdateInner({ log })
+  } catch (err) {
+    setProgress({ active: false, phase: "error", message: err?.message || String(err) })
+    throw err
+  }
+}
+
+async function applyUpdateInner({ log }) {
   if (isContainer()) {
     // Docker/Synology : pas de fichiers d'installeur à remplacer dans le
     // conteneur, la mise à jour se fait en changeant le tag d'image (voir
@@ -155,7 +199,9 @@ async function applyUpdate({ log = () => {} } = {}) {
 
   const tmpFile = path.join(os.tmpdir(), `packspace-s3-sync-update-${crypto.randomBytes(4).toString("hex")}-${asset.name}`)
   log("info", `Mise à jour : téléchargement de la version ${rel.version} (${asset.name})…`)
-  await downloadTo(asset.url, tmpFile)
+  setProgress({ active: true, phase: "download", percent: 0, received: 0, total: asset.size || 0, version: rel.version, message: null })
+  await downloadTo(asset.url, tmpFile, (p) => setProgress({ phase: "download", ...p }))
+  setProgress({ phase: "install", percent: 100 })
   if (process.platform !== "win32") {
     try {
       fs.chmodSync(tmpFile, 0o755)
@@ -181,6 +227,7 @@ async function applyUpdate({ log = () => {} } = {}) {
     }
     scheduleRestart()
     log("info", `Mise à jour ${rel.version} installée — redémarrage du service dans quelques secondes.`)
+    setProgress({ phase: "restart" })
     setTimeout(() => process.exit(0), 1500)
     return { applied: true, version: rel.version, restarting: true }
   }
@@ -190,8 +237,9 @@ async function applyUpdate({ log = () => {} } = {}) {
   // qu'il remplace — l'installeur le relance à la fin (Windows/Linux).
   log("info", `Mise à jour : installation silencieuse de la version ${rel.version}, l'application va redémarrer…`)
   installSilentlyForSession(tmpFile, asset)
+  setProgress({ phase: "restart" })
   setTimeout(() => process.exit(0), 1200)
   return { applied: true, version: rel.version, restarting: process.platform !== "darwin" }
 }
 
-module.exports = { applyUpdate, isRealService, isContainer }
+module.exports = { applyUpdate, isRealService, isContainer, getUpdateProgress }

@@ -162,7 +162,9 @@ class Engine {
   // ce cas (la connexion se coupe simplement).
   applyUpdate() {
     const { applyUpdate } = require("./selfUpdater")
-    return applyUpdate({ log: this.log })
+    // Chaque pas de progression réémet l'état (state.updateProgress) → la
+    // fenêtre affiche la barre de progression.
+    return applyUpdate({ log: this.log, onProgress: () => this.sync.emit() })
   }
 
   async login({ serverUrl, logon, password }) {
