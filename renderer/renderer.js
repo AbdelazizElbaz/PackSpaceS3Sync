@@ -305,6 +305,9 @@ $("loginBtn").addEventListener("click", async () => {
     await window.agent.login({ serverUrl, logon, password })
     $("password").value = ""
     await refreshConfig()
+    // La vérification de version faite au démarrage a pu échouer (pas
+    // encore connecté) : on la relance tout de suite.
+    refreshUpdateBanner()
   } catch (e) {
     err.textContent = e?.message || "Échec de connexion."
   } finally {
@@ -436,7 +439,11 @@ async function refreshServiceStatus() {
 }
 
 $("serviceRefreshBtn").addEventListener("click", refreshServiceStatus)
-$("settingsBtn").addEventListener("click", refreshServiceStatus)
+$("settingsBtn").addEventListener("click", () => {
+  refreshServiceStatus()
+  if (Date.now() - lastUpdateCheckAt > 60 * 1000) refreshUpdateBanner()
+  else renderUpdateCheckStatus()
+})
 
 $("serviceInstallBtn").addEventListener("click", async () => {
   if (
@@ -526,12 +533,15 @@ $("serviceUninstallBtn").addEventListener("click", async () => {
 let updateInfo = null
 let dismissedUpdateVersion = null
 
+let lastUpdateCheckAt = 0
 async function refreshUpdateBanner() {
   try {
     updateInfo = await window.agent.checkUpdate()
   } catch {
     updateInfo = null
   }
+  lastUpdateCheckAt = Date.now()
+  renderUpdateCheckStatus()
   const banner = $("updateBanner")
   if (!updateInfo?.available || updateInfo.version === dismissedUpdateVersion) {
     banner.classList.add("hidden")
@@ -570,6 +580,46 @@ $("updateApplyBtn").addEventListener("click", async () => {
 })
 
 setInterval(refreshUpdateBanner, 2 * 60 * 60 * 1000)
+// Tant qu'aucune vérification n'a abouti (pas connecté au démarrage,
+// réseau…), on réessaie toutes les 5 min plutôt que d'attendre 2 h.
+setInterval(() => {
+  if (!updateInfo || updateInfo.reason === "not_logged_in" || updateInfo.reason === "error") refreshUpdateBanner()
+}, 5 * 60 * 1000)
+
+// Réglages → "Vérifier maintenant" + ligne d'état lisible (version installée,
+// dernière version publiée, raison si rien à installer).
+function renderUpdateCheckStatus() {
+  const el = $("updateCheckStatus")
+  if (!el) return
+  const cur = updateInfo?.current ? `v${updateInfo.current}` : ""
+  if (!updateInfo) {
+    el.textContent = `Version installée : ${cur || "?"} — vérification impossible.`
+    return
+  }
+  if (updateInfo.available) {
+    el.textContent = `Version installée : ${cur} — nouvelle version v${updateInfo.version} disponible.`
+    return
+  }
+  const why = {
+    not_logged_in: "connectez-vous pour vérifier les mises à jour",
+    no_release: updateInfo.message || "aucune version publiée sur le serveur",
+    up_to_date: `à jour (dernière publiée : v${updateInfo.version || "?"})`,
+    no_asset_for_platform: `v${updateInfo.version} publiée mais sans installeur pour cette plateforme`,
+    error: `erreur : ${updateInfo.message || "réseau"}`,
+  }[updateInfo.reason] || "à jour"
+  el.textContent = `Version installée : ${cur} — ${why}.`
+}
+$("checkUpdateBtn")?.addEventListener("click", async () => {
+  const btn = $("checkUpdateBtn")
+  btn.disabled = true
+  btn.textContent = "Vérification…"
+  try {
+    await refreshUpdateBanner()
+  } finally {
+    btn.disabled = false
+    btn.textContent = "Vérifier maintenant"
+  }
+})
 
 // Notification système / menu tray (processus principal) → affiche la
 // bannière tout de suite, même si elle avait été masquée pour cette version.

@@ -358,6 +358,8 @@ ipcMain.handle("config:setAutoLaunch", async (_e, enabled) => {
 ipcMain.handle("auth:login", wrap(async (_e, payload) => {
   const out = await backend.call("login", [payload], 90000)
   lastAuthLost = false
+  // Vérification de version (notification système + tray) dès la connexion.
+  setTimeout(checkForUpdateAndNotify, 3000)
   return out
 }))
 

@@ -118,6 +118,10 @@
         <label title="Un fichier en échec définitif est remis en file automatiquement après ce délai. 0 = jamais (bouton Réessayer uniquement).">Réessayer les échecs après (min)<input id="failedRetryDelayMin" type="number" min="0" max="1440" /></label>
       </div>
       <div class="row">
+        <span id="updateCheckStatus" class="hint"></span>
+        <button id="checkUpdateBtn" class="small" type="button">Vérifier maintenant</button>
+      </div>
+      <div class="row">
         <span class="lbl" title="Installe seul les nouvelles versions publiées (vérification toutes les 2 h). Désactivé : notification seulement. Réglage partagé avec le B2B.">Mise à jour automatique</span>
         <label class="switch"><input type="checkbox" id="autoUpdateToggle" /><span class="slider"></span></label>
       </div>

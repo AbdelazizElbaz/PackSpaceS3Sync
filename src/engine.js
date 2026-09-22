@@ -126,14 +126,26 @@ class Engine {
   // release publiée). Ne throw jamais : un souci réseau => juste
   // "non disponible", pas d'erreur qui interromprait l'appelant.
   async checkUpdate() {
+    if (!store.get("serverUrl") || !store.get("token")) {
+      return { available: false, current: api.APP_VERSION, reason: "not_logged_in" }
+    }
     try {
       const rel = await api.fetchLatestRelease()
-      if (!rel?.available || !rel.version) return { available: false, current: api.APP_VERSION }
+      if (!rel?.available || !rel.version) {
+        return { available: false, current: api.APP_VERSION, reason: "no_release", message: rel?.message || null }
+      }
       const asset = pickAsset(rel.assets, PLATFORM_OS[process.platform] || null)
-      const available = isNewerVersion(rel.version, api.APP_VERSION) && !!asset
-      return { available, version: rel.version, current: api.APP_VERSION, asset }
-    } catch {
-      return { available: false, current: api.APP_VERSION }
+      const newer = isNewerVersion(rel.version, api.APP_VERSION)
+      const available = newer && !!asset
+      return {
+        available,
+        version: rel.version,
+        current: api.APP_VERSION,
+        asset,
+        reason: available ? null : !newer ? "up_to_date" : "no_asset_for_platform",
+      }
+    } catch (err) {
+      return { available: false, current: api.APP_VERSION, reason: "error", message: err?.message || String(err) }
     }
   }
 
