@@ -258,6 +258,7 @@ async function refreshConfig() {
     $("mainView").classList.remove("hidden")
     $("userLabel").textContent = `${c.userLabel || ""} · ${c.agentLabel || c.hostname || ""}`
     $("autoLaunchToggle").checked = !!c.autoLaunch
+    $("autoUpdateToggle").checked = Number(c.autoUpdate) === 1
     for (const k of SETTINGS) $(k).value = c[k]
     $("pollIntervalSec").value = Math.round((c.pollIntervalMs || 5000) / 1000)
     loadBrowse("")
@@ -368,6 +369,7 @@ $("saveSettingsBtn").addEventListener("click", async () => {
   const partial = {}
   for (const k of SETTINGS) partial[k] = Number($(k).value)
   partial.pollIntervalMs = Number($("pollIntervalSec").value) * 1000
+  partial.autoUpdate = $("autoUpdateToggle").checked ? 1 : 0
   try {
     await window.agent.setSettings(partial)
     $("settingsDialog").classList.add("hidden")
@@ -567,6 +569,20 @@ $("updateApplyBtn").addEventListener("click", async () => {
 })
 
 setInterval(refreshUpdateBanner, 2 * 60 * 60 * 1000)
+
+// Notification système / menu tray (processus principal) → affiche la
+// bannière tout de suite, même si elle avait été masquée pour cette version.
+window.agent.onUpdateAvailable?.((info) => {
+  if (!info?.available) return
+  updateInfo = info
+  dismissedUpdateVersion = null
+  $("updateBannerText").textContent = `Nouvelle version disponible : v${info.version} (actuelle : v${info.current || "?"})`
+  $("updateBanner").classList.remove("hidden")
+  $("updateApplyBtn").classList.remove("hidden")
+  $("updateDismissBtn").classList.remove("hidden")
+  $("updateApplyBtn").disabled = false
+  $("updateApplyBtn").textContent = "Mettre à jour"
+})
 
 // ---------- synchro : actions globales ----------
 

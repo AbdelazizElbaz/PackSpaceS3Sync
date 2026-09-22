@@ -30,6 +30,8 @@ contextBridge.exposeInMainWorld("agent", {
   serviceStatus: () => ipcRenderer.invoke("service:status"),
   serviceInstall: () => ipcRenderer.invoke("service:install"),
   serviceUninstall: () => ipcRenderer.invoke("service:uninstall"),
+  // Poussé par le processus principal quand une nouvelle version est détectée
+  onUpdateAvailable: (cb) => ipcRenderer.on("update:available", (_e, info) => cb(info)),
   serviceStop: () => ipcRenderer.invoke("service:stop"),
   serviceStart: () => ipcRenderer.invoke("service:start"),
 

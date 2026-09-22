@@ -22,6 +22,7 @@ const SETTING_KEYS = [
   "chunkThresholdMb",
   "maxRetries",
   "failedRetryDelayMin",
+  "autoUpdate",
 ]
 
 class Engine {

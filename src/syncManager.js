@@ -375,6 +375,31 @@ class SyncManager {
       })
   }
 
+  // Sur demande : "automatiser la mise à jour depuis l'app sync et depuis
+  // le B2B". Si autoUpdate=1 (réglage serveur ou local), vérifie la
+  // dernière version publiée au plus toutes les 2 h et l'installe seule
+  // via applyUpdate() (mode service : silencieux + redémarrage ; mode
+  // session : l'installeur se lance et l'app se ferme). Désactivé (0) :
+  // notification seulement (voir main.js checkForUpdateAndNotify).
+  async maybeAutoUpdate() {
+    const enabled = Number(this.settings().autoUpdate ?? store.get("autoUpdate") ?? 0) === 1
+    if (!enabled || this._updating) return
+    const now = Date.now()
+    if (this._lastAutoUpdateCheck && now - this._lastAutoUpdateCheck < 2 * 60 * 60 * 1000) return
+    this._lastAutoUpdateCheck = now
+    try {
+      const rel = await api.fetchLatestRelease()
+      if (!rel?.available || !rel.version) return
+      const { PLATFORM_OS, pickAsset, isNewerVersion } = require("./updateUtils")
+      if (!isNewerVersion(rel.version, api.APP_VERSION)) return
+      if (!pickAsset(rel.assets, PLATFORM_OS[process.platform] || null)) return
+      this.queueEvent({ type: "update_started", level: "info", message: `Mise à jour automatique vers v${rel.version} (réglage "autoUpdate").` })
+      this.applyUpdate()
+    } catch {
+      // réessayé au prochain cycle de 2 h
+    }
+  }
+
   // ---------- boucle ----------
 
   async pollLoop() {
@@ -413,6 +438,10 @@ class SyncManager {
 
         // 5. événements en attente
         await this.flushEvents()
+
+        // 6. mise à jour automatique (réglage partagé autoUpdate) — voir
+        //    maybeAutoUpdate() ; tourne aussi en mode service (headless).
+        await this.maybeAutoUpdate()
       }
       this.emit()
     }

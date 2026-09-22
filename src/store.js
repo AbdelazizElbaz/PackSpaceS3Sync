@@ -76,6 +76,8 @@ const store = new Conf({
     // Minutes avant remise en file automatique des fichiers en échec
     // définitif (0 = jamais, retry manuel seulement).
     failedRetryDelayMin: 15,
+    // 1 = installe seul les nouvelles versions (réglage partagé B2B/agent)
+    autoUpdate: 0,
     autoLaunch: true,
     // Instances de synchronisation : [{ id, name, prefix, localDir, enabled }]
     // (voir syncManager.js) + manifestes { instanceId: { s3Key: {size, etag, at} } }

@@ -1,4 +1,4 @@
-const { app, BrowserWindow, Tray, Menu, ipcMain, nativeImage, dialog, shell } = require("electron")
+const { app, BrowserWindow, Tray, Menu, ipcMain, nativeImage, dialog, shell, Notification } = require("electron")
 const path = require("path")
 const AutoLaunch = require("auto-launch")
 const store = require("./store")
@@ -69,24 +69,92 @@ function createWindow() {
   })
 }
 
+// Dernière mise à jour détectée par le processus principal (voir
+// scheduleUpdateNotifications) — alimente l'entrée du menu tray.
+let pendingUpdate = null
+
+function buildTrayMenu() {
+  if (!tray) return
+  const items = [
+    { label: "Ouvrir", click: () => createWindow() },
+    { label: "Vérifier maintenant", click: () => backend && backend.call("scanNow").catch(() => {}) },
+  ]
+  if (pendingUpdate?.available) {
+    items.push({ type: "separator" })
+    items.push({
+      label: `Mettre à jour vers v${pendingUpdate.version}`,
+      click: () => {
+        createWindow()
+        if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send("update:available", pendingUpdate)
+      },
+    })
+  }
+  items.push({ type: "separator" })
+  items.push({
+    label: "Quitter",
+    click: () => {
+      app.isQuitting = true
+      app.quit()
+    },
+  })
+  tray.setContextMenu(Menu.buildFromTemplate(items))
+}
+
 function buildTray() {
   tray = new Tray(iconImage())
   tray.setToolTip("PackSpace S3 Sync")
-  tray.setContextMenu(
-    Menu.buildFromTemplate([
-      { label: "Ouvrir", click: () => createWindow() },
-      { label: "Vérifier maintenant", click: () => backend && backend.call("scanNow").catch(() => {}) },
-      { type: "separator" },
-      {
-        label: "Quitter",
-        click: () => {
-          app.isQuitting = true
-          app.quit()
-        },
-      },
-    ])
-  )
+  buildTrayMenu()
   tray.on("click", () => createWindow())
+}
+
+// ---------- notification "nouvelle version" ----------
+// Sur demande : "sync doit être capable de me notifier qu'une version est
+// disponible pour la mettre à jour". La bannière de la fenêtre (renderer)
+// n'est visible que fenêtre ouverte ; ici le processus principal vérifie
+// au démarrage puis toutes les 2 h et affiche une NOTIFICATION SYSTÈME
+// (une seule fois par version), ajoute une entrée au menu tray et change
+// l'info-bulle. Un clic sur la notification ouvre la fenêtre sur la
+// bannière de mise à jour.
+const UPDATE_CHECK_MS = 2 * 60 * 60 * 1000
+let notifiedUpdateVersion = null
+
+async function checkForUpdateAndNotify() {
+  if (!backend) return
+  let info = null
+  try {
+    info = await backend.call("checkUpdate", [], 30000)
+  } catch {
+    return
+  }
+  pendingUpdate = info?.available ? info : null
+  buildTrayMenu()
+  if (tray) {
+    tray.setToolTip(pendingUpdate ? `PackSpace S3 Sync — mise à jour v${pendingUpdate.version} disponible` : "PackSpace S3 Sync")
+  }
+  if (!pendingUpdate || pendingUpdate.version === notifiedUpdateVersion) return
+  notifiedUpdateVersion = pendingUpdate.version
+
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.webContents.send("update:available", pendingUpdate)
+  }
+  if (Notification.isSupported()) {
+    const n = new Notification({
+      title: "PackSpace S3 Sync — mise à jour disponible",
+      body: `Version v${pendingUpdate.version} disponible (actuelle : v${pendingUpdate.current || "?"}). Cliquez pour mettre à jour.`,
+      icon: iconImage(),
+    })
+    n.on("click", () => {
+      createWindow()
+      if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send("update:available", pendingUpdate)
+    })
+    n.show()
+  }
+}
+
+function scheduleUpdateNotifications() {
+  // Premier contrôle 30 s après le démarrage (laisse le backend se connecter).
+  setTimeout(checkForUpdateAndNotify, 30 * 1000)
+  setInterval(checkForUpdateAndNotify, UPDATE_CHECK_MS)
 }
 
 function pushState(state) {
@@ -189,9 +257,13 @@ function startBackend() {
 }
 
 app.whenReady().then(() => {
+  // Requis sur Windows pour que les notifications système s'affichent
+  // (doit correspondre à build.appId dans package.json).
+  if (process.platform === "win32") app.setAppUserModelId("ma.packspace.s3sync")
   buildTray()
   createWindow()
   startBackend()
+  scheduleUpdateNotifications()
 
   if (store.get("autoLaunch")) {
     autoLauncher.isEnabled().then((enabled) => {
