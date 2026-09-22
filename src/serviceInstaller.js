@@ -393,6 +393,70 @@ ${copyBack}
   }
 }
 
+// ---------- arrêt / démarrage sans désinstaller ----------
+// Sur demande : "je dois être capable d'arrêter le service". Le service
+// reste installé (démarrage auto au boot conservé) ; on l'arrête ou le
+// relance seulement. À l'arrêt, service.js appelle /desktop/agent/offline
+// → le poste passe hors ligne dans le B2B tout de suite.
+
+async function stopWindows(p) {
+  const svc = winService(p)
+  svc.directory(p.dataDir)
+  await withTimeout(
+    new Promise((resolve, reject) => {
+      svc.on("error", (e) => reject(new Error(`Service Windows : ${e?.message || e}`)))
+      svc.on("stop", () => resolve())
+      svc.stop()
+    }),
+    60000,
+    "Arrêt du service"
+  )
+}
+
+async function startWindows(p) {
+  const svc = winService(p)
+  svc.directory(p.dataDir)
+  await withTimeout(
+    new Promise((resolve, reject) => {
+      svc.on("error", (e) => reject(new Error(`Service Windows : ${e?.message || e}`)))
+      svc.on("start", () => resolve())
+      svc.start()
+    }),
+    60000,
+    "Démarrage du service"
+  )
+}
+
+async function stopUnix() {
+  if (process.platform === "linux") {
+    await runElevated(`set -e\nsystemctl stop ${LINUX_UNIT}\n`)
+  } else {
+    await runElevated(`set -e\nlaunchctl bootout system/${MAC_LABEL}\n`)
+  }
+}
+
+async function startUnix() {
+  if (process.platform === "linux") {
+    await runElevated(`set -e\nsystemctl start ${LINUX_UNIT}\n`)
+  } else {
+    await runElevated(`set -e\nlaunchctl bootstrap system ${shq(MAC_PLIST)}\n`)
+  }
+}
+
+async function stop() {
+  const p = paths()
+  if (process.platform === "win32") await stopWindows(p)
+  else await stopUnix()
+  return status()
+}
+
+async function start() {
+  const p = paths()
+  if (process.platform === "win32") await startWindows(p)
+  else await startUnix()
+  return status()
+}
+
 // ---------- API ----------
 
 async function install() {
@@ -413,4 +477,4 @@ async function uninstall() {
   return status()
 }
 
-module.exports = { status, install, uninstall, paths, support, exportSnapshot, importSnapshot, SERVICE_LABEL }
+module.exports = { status, install, uninstall, stop, start, paths, support, exportSnapshot, importSnapshot, SERVICE_LABEL }

@@ -524,8 +524,38 @@ class SyncManager {
 
   // ---------- pool ----------
 
+  // Minutes avant qu'un fichier en échec définitif soit réessayé tout seul.
+  // Lu directement (pas via setting()) car 0 est une valeur valide = jamais.
+  failedRetryDelayMin() {
+    const v = Number(this.settings().failedRetryDelayMin ?? store.get("failedRetryDelayMin") ?? 15)
+    return Number.isFinite(v) && v >= 0 ? v : 15
+  }
+
+  // Fichiers "failed" dont le délai de reprise automatique est écoulé :
+  // repartent avec un compteur de tentatives remis à zéro (comme un clic
+  // sur "Réessayer"). Appelé à chaque cycle et à chaque dispatch.
+  requeueExpiredFailures() {
+    const now = Date.now()
+    let n = 0
+    for (const item of this.items.values()) {
+      if (item.status === "failed" && item.nextAttemptAt > 0 && item.nextAttemptAt <= now) {
+        item.status = "queued"
+        item.attempts = 0
+        item.error = null
+        item.nextAttemptAt = 0
+        n++
+      }
+    }
+    if (n) {
+      this.queueEvent({ type: "command", level: "info", message: `Reprise automatique : ${n} fichier(s) en échec remis en file.` })
+      this.emit()
+    }
+    return n
+  }
+
   dispatch() {
     if (this.paused) return
+    this.requeueExpiredFailures()
     const max = Math.max(1, this.setting("maxParallelFiles", 4))
     const now = Date.now()
     const enabled = new Set(this.instances().filter((i) => i.enabled).map((i) => i.id))
@@ -536,7 +566,9 @@ class SyncManager {
       if (!enabled.has(item.instanceId)) continue
       this.launch(item)
     }
-    const waiting = Array.from(this.items.values()).filter((i) => i.status === "queued" && i.nextAttemptAt > now)
+    const waiting = Array.from(this.items.values()).filter(
+      (i) => (i.status === "queued" || i.status === "failed") && i.nextAttemptAt > now
+    )
     if (waiting.length) {
       const nextWake = Math.min(...waiting.map((i) => i.nextAttemptAt))
       clearTimeout(this.wakeTimer)
@@ -652,6 +684,13 @@ class SyncManager {
     } else {
       item.status = "failed"
       item.error = message
+      // Remise en file AUTOMATIQUE après failedRetryDelayMin (réglage
+      // partagé B2B/agent, 0 = jamais) — voir requeueExpiredFailures().
+      // Sur demande : "le service doit réessayer de retélécharger les
+      // fichiers automatiquement après une durée configurée".
+      const delayMin = this.failedRetryDelayMin()
+      item.nextAttemptAt = delayMin > 0 ? Date.now() + delayMin * 60000 : 0
+      if (delayMin > 0) item.error = `${message} — nouvelle tentative automatique dans ${delayMin} min`
       this.queueEvent({
         type: "file_failed",
         level: "error",

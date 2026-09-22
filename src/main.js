@@ -367,6 +367,19 @@ ipcMain.handle("service:install", wrap(async () => {
   return serviceInstaller.status()
 }))
 
+// Arrêt / démarrage du service SANS le désinstaller (voir
+// serviceInstaller.stop/start). La fenêtre reste en mode service : le
+// bandeau "service injoignable" s'affiche tant qu'il est arrêté.
+ipcMain.handle("service:stop", wrap(() => serviceInstaller.stop()))
+ipcMain.handle("service:start", wrap(async () => {
+  const st = await serviceInstaller.start()
+  // Reprend le polling du backend service tout de suite.
+  if (backend && backend.kind === "service") {
+    backend.client.state().then(pushState).catch(() => {})
+  }
+  return st
+}))
+
 ipcMain.handle("service:uninstall", wrap(async () => {
   if (backend && backend.kind === "service") await backend.stop()
   try {

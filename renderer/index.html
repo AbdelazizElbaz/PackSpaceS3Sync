@@ -115,6 +115,7 @@
         <label>Découper à partir de (Mo)<input id="chunkThresholdMb" type="number" min="1" max="1024" /></label>
         <label>Vérification des dossiers (s)<input id="pollIntervalSec" type="number" min="2" max="600" /></label>
         <label>Tentatives max<input id="maxRetries" type="number" min="0" max="20" /></label>
+        <label title="Un fichier en échec définitif est remis en file automatiquement après ce délai. 0 = jamais (bouton Réessayer uniquement).">Réessayer les échecs après (min)<input id="failedRetryDelayMin" type="number" min="0" max="1440" /></label>
       </div>
       <div class="row">
         <span class="lbl">Démarrer avec l'ordinateur</span>
@@ -134,6 +135,8 @@
         <div class="modal-actions" style="margin-top:8px">
           <button id="serviceRefreshBtn" class="small ghost">Actualiser</button>
           <button id="serviceInstallBtn" class="small primary">Installer le service</button>
+          <button id="serviceStopBtn" class="small hidden" title="Arrête le service (il reste installé et redémarrera avec l'ordinateur). Le poste passe hors ligne dans le B2B.">Arrêter le service</button>
+          <button id="serviceStartBtn" class="small primary hidden">Démarrer le service</button>
           <button id="serviceUninstallBtn" class="small danger hidden">Désinstaller le service</button>
         </div>
       </div>

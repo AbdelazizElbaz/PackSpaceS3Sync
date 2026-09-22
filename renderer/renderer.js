@@ -1,6 +1,6 @@
 const $ = (id) => document.getElementById(id)
 
-const SETTINGS = ["maxParallelFiles", "maxParallelChunks", "chunkSizeMb", "chunkThresholdMb", "maxRetries"]
+const SETTINGS = ["maxParallelFiles", "maxParallelChunks", "chunkSizeMb", "chunkThresholdMb", "maxRetries", "failedRetryDelayMin"]
 
 let currentPrefix = "" // dossier S3 affiché dans l'explorateur ("" = racine PrintProd)
 let currentRoot = "PrintProd/PrintWorkSpace"
@@ -384,6 +384,8 @@ async function refreshServiceStatus() {
   const info = $("serviceInfo")
   const installBtn = $("serviceInstallBtn")
   const uninstallBtn = $("serviceUninstallBtn")
+  const stopBtn = $("serviceStopBtn")
+  const startBtn = $("serviceStartBtn")
   try {
     const s = await window.agent.serviceStatus()
     if (!s.supported) {
@@ -392,6 +394,8 @@ async function refreshServiceStatus() {
       info.textContent = s.reason || ""
       installBtn.classList.add("hidden")
       uninstallBtn.classList.add("hidden")
+      stopBtn.classList.add("hidden")
+      startBtn.classList.add("hidden")
       return
     }
     if (!s.installed) {
@@ -400,10 +404,14 @@ async function refreshServiceStatus() {
       info.textContent = `L'agent tourne dans cette fenêtre (mode session). Données du service : ${s.dataDir}`
       installBtn.classList.remove("hidden")
       uninstallBtn.classList.add("hidden")
+      stopBtn.classList.add("hidden")
+      startBtn.classList.add("hidden")
       return
     }
     installBtn.classList.add("hidden")
     uninstallBtn.classList.remove("hidden")
+    stopBtn.classList.toggle("hidden", !s.running)
+    startBtn.classList.toggle("hidden", !!s.running)
     if (s.running && s.reachable !== false) {
       badge.textContent = "actif"
       badge.className = "badge"
@@ -415,7 +423,7 @@ async function refreshServiceStatus() {
     } else {
       badge.textContent = "arrêté"
       badge.className = "badge err"
-      info.textContent = `Le service est installé mais arrêté. Démarrez-le depuis le gestionnaire de services (voir README) ou désinstallez-le pour repasser en mode session. Journal : ${s.dataDir}/logs/service.log`
+      info.textContent = `Le service est installé mais arrêté : aucune synchronisation ne tourne et le poste est hors ligne dans le B2B. Cliquez « Démarrer le service » pour reprendre. Journal : ${s.dataDir}/logs/service.log`
     }
   } catch (e) {
     badge.textContent = "erreur"
@@ -451,6 +459,35 @@ $("serviceInstallBtn").addEventListener("click", async () => {
     btn.disabled = false
     btn.textContent = "Installer le service"
   }
+})
+
+async function runServiceAction(btnId, label, busyLabel, fn) {
+  const btn = $(btnId)
+  btn.disabled = true
+  btn.textContent = busyLabel
+  try {
+    await fn()
+    await refreshServiceStatus()
+  } catch (e) {
+    alert(e?.message || `${label} impossible.`)
+  } finally {
+    btn.disabled = false
+    btn.textContent = label
+  }
+}
+
+$("serviceStopBtn").addEventListener("click", async () => {
+  if (
+    !confirm(
+      "Arrêter le service ?\n\n• Les téléchargements en cours sont interrompus proprement (ils reprendront là où ils en étaient au redémarrage).\n• Le poste passe hors ligne dans le B2B.\n• Le service reste installé et redémarrera avec l'ordinateur.\n• Une élévation (administrateur) peut être demandée."
+    )
+  )
+    return
+  await runServiceAction("serviceStopBtn", "Arrêter le service", "Arrêt…", () => window.agent.serviceStop())
+})
+
+$("serviceStartBtn").addEventListener("click", async () => {
+  await runServiceAction("serviceStartBtn", "Démarrer le service", "Démarrage…", () => window.agent.serviceStart())
 })
 
 $("serviceUninstallBtn").addEventListener("click", async () => {

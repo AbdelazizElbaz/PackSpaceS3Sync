@@ -30,6 +30,8 @@ contextBridge.exposeInMainWorld("agent", {
   serviceStatus: () => ipcRenderer.invoke("service:status"),
   serviceInstall: () => ipcRenderer.invoke("service:install"),
   serviceUninstall: () => ipcRenderer.invoke("service:uninstall"),
+  serviceStop: () => ipcRenderer.invoke("service:stop"),
+  serviceStart: () => ipcRenderer.invoke("service:start"),
 
   // Mise à jour de l'agent (voir selfUpdater.js)
   checkUpdate: () => ipcRenderer.invoke("update:check"),
