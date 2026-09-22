@@ -15,9 +15,11 @@
 ; ---------------------------------------------------------------------------
 !include "WordFunc.nsh"
 
-Var PS_InstalledVersion
-
 !macro customInit
+  ; Déclarée ICI (et pas au niveau global) : le désinstalleur est compilé
+  ; avec le même script mais sans customInit → une variable globale non
+  ; utilisée y déclencherait "warning 6001 … treated as error".
+  Var /GLOBAL PS_InstalledVersion
   StrCpy $PS_InstalledVersion ""
   ReadRegStr $PS_InstalledVersion HKCU "${UNINSTALL_REGISTRY_KEY}" "DisplayVersion"
   ${if} $PS_InstalledVersion == ""
