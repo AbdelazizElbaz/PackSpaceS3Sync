@@ -102,7 +102,7 @@ function buildTrayMenu() {
 
 function buildTray() {
   tray = new Tray(iconImage())
-  tray.setToolTip("PackSpace S3 Sync")
+  tray.setToolTip(`PackSpace S3 Sync v${api.APP_VERSION}`)
   buildTrayMenu()
   tray.on("click", () => createWindow())
 }
@@ -129,7 +129,7 @@ async function checkForUpdateAndNotify() {
   pendingUpdate = info?.available ? info : null
   buildTrayMenu()
   if (tray) {
-    tray.setToolTip(pendingUpdate ? `PackSpace S3 Sync — mise à jour v${pendingUpdate.version} disponible` : "PackSpace S3 Sync")
+    tray.setToolTip(pendingUpdate ? `PackSpace S3 Sync v${api.APP_VERSION} — mise à jour v${pendingUpdate.version} disponible` : `PackSpace S3 Sync v${api.APP_VERSION}`)
   }
   if (!pendingUpdate || pendingUpdate.version === notifiedUpdateVersion) return
   notifiedUpdateVersion = pendingUpdate.version
@@ -332,6 +332,7 @@ async function configSnapshot() {
     mode,
     serviceUnreachable,
     serviceSupport: serviceInstaller.support(),
+    appVersion: api.APP_VERSION,
   }
 }
 

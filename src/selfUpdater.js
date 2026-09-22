@@ -101,20 +101,37 @@ function scheduleRestart(delaySec = 6) {
   }
 }
 
-// Ouvre l'installeur pour que l'utilisateur le termine lui-même (mode
-// session, fenêtre ouverte) — jamais silencieux : on ne remplace pas les
-// fichiers d'une app en train de tourner sans que quelqu'un valide.
-function openInstallerForUser(file) {
+// Mise à jour EN PLACE et SILENCIEUSE en mode session (sur demande : "la
+// mise à jour ne doit pas se faire en désinstallant la version et
+// installant la nouvelle, ça doit être silencieux et inclus dans
+// l'application"). L'installeur remplace les fichiers du programme dans le
+// même dossier et RELANCE l'application tout seul ; la configuration
+// (jeton, instances, fichiers déjà synchronisés) est dans le dossier de
+// données utilisateur, jamais touché — voir build/installer.nsh.
+//   - Windows : installeur NSIS lancé avec /S (silencieux) --updated
+//     (pas de signalement de désinstallation, service conservé) et
+//     --force-run (relance l'app à la fin).
+//   - Linux (.deb) : dpkg -i avec élévation (pkexec) puis relance.
+//   - macOS : pas d'installation silencieuse d'un .dmg → on l'ouvre pour
+//     que l'utilisateur glisse l'app dans Applications (config conservée).
+function installSilentlyForSession(file, asset) {
   let child
   if (process.platform === "win32") {
-    child = spawn(file, [], { detached: true, stdio: "ignore" })
+    child = spawn(file, ["/S", "--updated", "--force-run"], { detached: true, stdio: "ignore", windowsHide: true })
   } else if (process.platform === "darwin") {
     child = spawn("open", [file], { detached: true, stdio: "ignore" })
+  } else if (asset?.kind === "deb") {
+    const exe = process.execPath.replace(/'/g, "'\\''")
+    child = spawn(
+      "sh",
+      ["-c", `pkexec dpkg -i '${file.replace(/'/g, "'\\''")}' && (nohup '${exe}' >/dev/null 2>&1 &)`],
+      { detached: true, stdio: "ignore" }
+    )
   } else {
     child = spawn("xdg-open", [file], { detached: true, stdio: "ignore" })
   }
   child.on("error", () => {
-    /* pas de handler graphique dispo : le fichier reste téléchargé, voir le message d'erreur renvoyé à l'appelant */
+    /* pas de handler dispo : le fichier reste téléchargé, voir le message d'erreur renvoyé à l'appelant */
   })
   child.unref()
 }
@@ -168,12 +185,13 @@ async function applyUpdate({ log = () => {} } = {}) {
     return { applied: true, version: rel.version, restarting: true }
   }
 
-  // Mode session (fenêtre ouverte, pas de service) : assistant visible,
-  // puis on ferme l'agent pour libérer les fichiers qu'il remplace.
-  log("info", "Mise à jour : lancement de l'assistant d'installation…")
-  openInstallerForUser(tmpFile)
-  setTimeout(() => process.exit(0), 800)
-  return { applied: true, version: rel.version, restarting: false }
+  // Mode session (fenêtre ouverte, pas de service) : installation
+  // silencieuse en place, puis on ferme l'agent pour libérer les fichiers
+  // qu'il remplace — l'installeur le relance à la fin (Windows/Linux).
+  log("info", `Mise à jour : installation silencieuse de la version ${rel.version}, l'application va redémarrer…`)
+  installSilentlyForSession(tmpFile, asset)
+  setTimeout(() => process.exit(0), 1200)
+  return { applied: true, version: rel.version, restarting: process.platform !== "darwin" }
 }
 
 module.exports = { applyUpdate, isRealService, isContainer }

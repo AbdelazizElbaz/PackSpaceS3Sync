@@ -253,6 +253,7 @@ async function refreshConfig() {
   const c = await window.agent.getConfig()
   $("modeBadge").classList.toggle("hidden", !["service", "web"].includes(c.mode))
   renderServiceBanner(c.serviceUnreachable)
+  if (c.appVersion) $("appVersion").textContent = `v${c.appVersion}`
   if (c.isLoggedIn) {
     $("loginView").classList.add("hidden")
     $("mainView").classList.remove("hidden")
@@ -536,7 +537,7 @@ async function refreshUpdateBanner() {
     banner.classList.add("hidden")
     return
   }
-  $("updateBannerText").textContent = `Nouvelle version disponible : v${updateInfo.version} (actuelle : v${updateInfo.current || "?"})`
+  $("updateBannerText").textContent = `Nouvelle version disponible : v${updateInfo.version} (installée : v${updateInfo.current || "?"}). Installation silencieuse, sans désinstallation — votre connexion et vos réglages sont conservés.`
   banner.classList.remove("hidden")
 }
 
@@ -548,8 +549,8 @@ $("updateDismissBtn").addEventListener("click", () => {
 $("updateApplyBtn").addEventListener("click", async () => {
   if (
     !confirm(
-      `Télécharger et installer la version v${updateInfo?.version} ?\n\n` +
-        "L'agent va se fermer pour terminer l'installation (mode session) ou redémarrer tout seul (mode service, synchro brièvement interrompue)."
+      `Installer la version v${updateInfo?.version} maintenant ?\n\n` +
+        "Installation silencieuse en place : l'application redémarre toute seule à la fin (quelques secondes, synchro brièvement interrompue). Connexion, instances et fichiers déjà synchronisés sont conservés."
     )
   )
     return
@@ -558,13 +559,13 @@ $("updateApplyBtn").addEventListener("click", async () => {
   btn.textContent = "Téléchargement…"
   try {
     await window.agent.applyUpdate()
-    $("updateBannerText").textContent = "Mise à jour en cours — l'agent va se fermer ou redémarrer dans quelques secondes."
+    $("updateBannerText").textContent = "Mise à jour en cours — l'application redémarre dans quelques secondes."
     btn.classList.add("hidden")
     $("updateDismissBtn").classList.add("hidden")
   } catch (e) {
     alert(e?.message || "Mise à jour impossible.")
     btn.disabled = false
-    btn.textContent = "Mettre à jour"
+    btn.textContent = "Mettre à jour maintenant"
   }
 })
 
@@ -576,12 +577,12 @@ window.agent.onUpdateAvailable?.((info) => {
   if (!info?.available) return
   updateInfo = info
   dismissedUpdateVersion = null
-  $("updateBannerText").textContent = `Nouvelle version disponible : v${info.version} (actuelle : v${info.current || "?"})`
+  $("updateBannerText").textContent = `Nouvelle version disponible : v${info.version} (installée : v${info.current || "?"}). Installation silencieuse, sans désinstallation — votre connexion et vos réglages sont conservés.`
   $("updateBanner").classList.remove("hidden")
   $("updateApplyBtn").classList.remove("hidden")
   $("updateDismissBtn").classList.remove("hidden")
   $("updateApplyBtn").disabled = false
-  $("updateApplyBtn").textContent = "Mettre à jour"
+  $("updateApplyBtn").textContent = "Mettre à jour maintenant"
 })
 
 // ---------- synchro : actions globales ----------

@@ -7,7 +7,7 @@
 </head>
 <body>
   <header class="topbar">
-    <span class="brand">PackSpace S3 Sync</span>
+    <span class="brand">PackSpace S3 Sync <span id="appVersion" class="app-version" title="Version installée"></span></span>
     <span class="topbar-right">
       <span id="modeBadge" class="mode-badge hidden" title="L'agent tourne comme service : il continue même session fermée">service</span>
       <span id="globalStatus" class="global-status"></span>
@@ -21,7 +21,7 @@
   <!-- Nouvelle version publiée (voir selfUpdater.js) -->
   <div id="updateBanner" class="update-banner hidden">
     <span id="updateBannerText"></span>
-    <button id="updateApplyBtn" class="small" type="button">Mettre à jour</button>
+    <button id="updateApplyBtn" class="small" type="button">Mettre à jour maintenant</button>
     <button id="updateDismissBtn" class="small ghost" type="button">Plus tard</button>
   </div>
 
