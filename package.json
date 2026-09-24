@@ -1,7 +1,7 @@
 {
   "name": "packspace-s3-sync",
   "productName": "PackSpace S3 Sync",
-  "version": "1.0.0",
+  "version": "1.0.6",
   "description": "Synchronise automatiquement (multi-thread) les fichiers d'impression Packspace depuis S3 vers un dossier local.",
   "main": "src/main.js",
   "author": {

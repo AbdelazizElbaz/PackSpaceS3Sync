@@ -31,8 +31,10 @@ const APP_VERSION = (() => {
 })()
 
 // Rôles Packspace autorisés à utiliser l'agent (miroir de
-// DesktopFilesController::AGENT_ROLES côté API2).
-const AGENT_ROLES = ["admin", "operator"]
+// DesktopFilesController::AGENT_RUNTIME_ROLES côté API2) : le compte DÉDIÉ
+// "sync_agent" (créé depuis la page Synchronisation du B2B — usage
+// recommandé) ou, à défaut, un compte administrateur/opérateur.
+const AGENT_ROLES = ["sync_agent", "admin", "operator"]
 
 // Client HTTP vers l'API Packspace (Laravel API2). Le token 'desktop-agent'
 // est rejoué sur chaque appel via Authorization: Bearer — l'agent est un
@@ -81,6 +83,30 @@ async function ping(serverUrl) {
 
 async function login(serverUrl, logon, password) {
   const base = normalizeServerUrl(serverUrl)
+
+  // 1) COMPTE DE SERVICE de l'agent (Packspace → Synchronisation → « Comptes
+  //    de l'agent ») : POST /desktop/agent/login renvoie directement le jeton
+  //    longue durée. 401 = identifiants inconnus côté comptes de service → on
+  //    retombe sur la connexion utilisateur (admin/opérateur) ci-dessous ;
+  //    404/405 = API antérieure sans cet endpoint.
+  try {
+    const svc = await axios.post(
+      `${base}/desktop/agent/login`,
+      { logon, password },
+      { headers: { Accept: "application/json" }, timeout: 15000 }
+    )
+    if (svc.data?.success && svc.data?.data?.token) {
+      return { ...svc.data.data, serverUrl: base }
+    }
+  } catch (err) {
+    const status = err?.response?.status
+    if (status && status !== 401 && status !== 404 && status !== 405) {
+      throw new Error(err.response?.data?.message || `Échec de connexion (${status})`)
+    }
+    // sinon : on tente le compte utilisateur
+  }
+
+  // 2) Compte utilisateur admin / opérateur (ancien flux)
   const res = await axios.post(
     `${base}/login`,
     { logon, password },
@@ -91,7 +117,7 @@ async function login(serverUrl, logon, password) {
   }
   const session = res.data.data // { token, logon, first_name, last_name, role, ... }
 
-  // Seuls les comptes admin / opérateur peuvent faire tourner l'agent
+  // Seuls le compte dédié sync_agent et les comptes admin / opérateur peuvent faire tourner l'agent
   // (même règle côté API2 : DesktopFilesController::AGENT_ROLES). On
   // refuse ici avec un message clair plutôt que de laisser
   // /desktop/agent-token répondre 403, et on révoque tout de suite la
@@ -100,7 +126,7 @@ async function login(serverUrl, logon, password) {
     axios
       .post(`${base}/logout`, {}, { headers: { Authorization: `Bearer ${session.token}` }, timeout: 5000 })
       .catch(() => {})
-    throw new Error("Ce compte n'est pas autorisé : utilisez un compte administrateur ou opérateur.")
+    throw new Error("Ce compte n'est pas autorisé : utilisez un compte de l'agent (Packspace → Synchronisation → « Comptes de l'agent ») ou un compte administrateur/opérateur.")
   }
 
   const agent = await axios.post(
