@@ -313,6 +313,7 @@ async function refreshConfig() {
     $("mainView").classList.add("hidden")
     $("userLabel").textContent = ""
     if (c.serverUrl) $("serverUrl").value = c.serverUrl
+    if (c.tenant) $("tenant").value = c.tenant
   }
 }
 
@@ -321,12 +322,28 @@ $("pingBtn").addEventListener("click", async () => {
   out.className = "hint"
   out.textContent = "Test en cours…"
   try {
-    const r = await window.agent.ping($("serverUrl").value.trim())
+    const r = await window.agent.ping($("serverUrl").value.trim(), $("tenant").value.trim())
     const recent = Number(r.desktop_api || 0) >= 2
-    out.className = recent ? "hint ok" : "hint err"
-    out.textContent = recent
+    let ok = recent
+    let text = recent
       ? `OK — ${r.app || "API"} répond sur ${r.serverUrl}`
       : `L'API répond (${r.serverUrl}) mais sans les endpoints de synchro S3 : redéployer API2.`
+    // API multi-client (PrintIOS) : l'espace client est obligatoire et vérifié.
+    if (r.tenancy) {
+      if (r.tenantRequired) {
+        ok = false
+        text += " — API multi-client : indiquez votre espace client."
+      } else if (r.tenantCheck && r.tenantCheck.found === false) {
+        ok = false
+        text += ` — espace client « ${r.tenant} » inconnu.`
+      } else if (r.tenantCheck?.found) {
+        text += ` — espace « ${r.tenantCheck.slug}${r.tenantCheck.type === "demo" ? " (démo)" : ""} »`
+      } else {
+        text += ` — espace « ${r.tenant} » (vérifié à la connexion)`
+      }
+    }
+    out.className = ok ? "hint ok" : "hint err"
+    out.textContent = text
   } catch (e) {
     out.className = "hint err"
     out.textContent = e?.message || "Échec du test."
@@ -337,6 +354,7 @@ $("loginBtn").addEventListener("click", async () => {
   const err = $("loginError")
   err.textContent = ""
   const serverUrl = $("serverUrl").value.trim()
+  const tenant = $("tenant").value.trim()
   const logon = $("logon").value.trim()
   const password = $("password").value
   if (!serverUrl || !logon || !password) {
@@ -347,7 +365,7 @@ $("loginBtn").addEventListener("click", async () => {
   btn.disabled = true
   btn.textContent = "Connexion…"
   try {
-    await window.agent.login({ serverUrl, logon, password })
+    await window.agent.login({ serverUrl, tenant, logon, password })
     $("password").value = ""
     await refreshConfig()
     // La vérification de version faite au démarrage a pu échouer (pas

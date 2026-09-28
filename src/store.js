@@ -64,6 +64,11 @@ const store = new Conf({
   configName: "packspace-s3-sync-config",
   defaults: {
     serverUrl: "",
+    // Multi-client PrintIOS (API2 multi-tenant, voir docs/multi-tenant.md du
+    // monorepo) : espace client envoyé dans l'en-tête X-Tenant — slug
+    // ("packspace") ou hôte de l'espace ("packspace.printios.ma",
+    // "om.packspace.ma"). Vide = API mono-client (Packspace historique).
+    tenant: "",
     token: "",
     userLabel: "",
     downloadDir: "",

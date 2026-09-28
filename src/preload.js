@@ -7,7 +7,7 @@ contextBridge.exposeInMainWorld("agent", {
   setSettings: (partial) => ipcRenderer.invoke("config:setSettings", partial),
   chooseDir: () => ipcRenderer.invoke("config:chooseDir"),
   setAutoLaunch: (enabled) => ipcRenderer.invoke("config:setAutoLaunch", enabled),
-  ping: (serverUrl) => ipcRenderer.invoke("auth:ping", serverUrl),
+  ping: (serverUrl, tenant) => ipcRenderer.invoke("auth:ping", serverUrl, tenant),
   login: (payload) => ipcRenderer.invoke("auth:login", payload),
   logout: () => ipcRenderer.invoke("auth:logout"),
 

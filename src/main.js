@@ -319,6 +319,7 @@ async function configSnapshot() {
     serviceUnreachable = err.message
     cfg = {
       serverUrl: store.get("serverUrl"),
+      tenant: store.get("tenant") || "",
       userLabel: store.get("userLabel"),
       isLoggedIn: !!store.get("token"),
       agentLabel: store.get("agentLabel") || "",
@@ -363,9 +364,9 @@ ipcMain.handle("auth:login", wrap(async (_e, payload) => {
   return out
 }))
 
-ipcMain.handle("auth:ping", async (_e, serverUrl) => {
+ipcMain.handle("auth:ping", async (_e, serverUrl, tenant = "") => {
   try {
-    return await backend.call("ping", [serverUrl])
+    return await backend.call("ping", [serverUrl, tenant])
   } catch (err) {
     const status = err?.response?.status
     if (status === 404) throw new Error("L'API répond mais sans /ping : version API2 trop ancienne (redéployer).")

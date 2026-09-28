@@ -86,7 +86,7 @@
       return d && d.trim() ? d.trim() : null
     },
     setAutoLaunch: async () => false,
-    ping: (serverUrl) => rpc("ping", [serverUrl]),
+    ping: (serverUrl, tenant) => rpc("ping", [serverUrl, tenant]),
     login: (payload) => rpc("login", [payload]),
     logout: () => rpc("logout"),
     browse: (prefix) => rpc("browse", [prefix || ""]),

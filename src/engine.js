@@ -80,6 +80,7 @@ class Engine {
     const server = store.get("serverSettings") || {}
     const out = {
       serverUrl: store.get("serverUrl"),
+      tenant: store.get("tenant") || "",
       userLabel: store.get("userLabel"),
       isLoggedIn: !!store.get("token"),
       agentId: store.get("agentId") || null,
@@ -115,8 +116,8 @@ class Engine {
     return this.getConfig()
   }
 
-  ping(serverUrl) {
-    return api.ping(serverUrl)
+  ping(serverUrl, tenant = "") {
+    return api.ping(serverUrl, tenant)
   }
 
   // Vérifie la dernière version publiée (même source que la carte de
@@ -167,9 +168,10 @@ class Engine {
     return applyUpdate({ log: this.log, onProgress: () => this.sync.emit() })
   }
 
-  async login({ serverUrl, logon, password }) {
-    const data = await api.login(serverUrl, logon, password)
+  async login({ serverUrl, logon, password, tenant = "" }) {
+    const data = await api.login(serverUrl, logon, password, tenant)
     store.set("serverUrl", data.serverUrl || serverUrl)
+    store.set("tenant", api.normalizeTenant(tenant))
     store.set("token", data.token)
     store.set("userLabel", `${data.first_name || ""} ${data.last_name || ""}`.trim() || data.logon)
     this.sync.registered = false
@@ -179,7 +181,7 @@ class Engine {
     // reprennent là où ils s'étaient arrêtés.
     this.sync.start()
     this.sync.scanNow()
-    this.log("info", `Connecté (${store.get("userLabel")}) sur ${store.get("serverUrl")}`)
+    this.log("info", `Connecté (${store.get("userLabel")}) sur ${store.get("serverUrl")}${store.get("tenant") ? ` — espace ${store.get("tenant")}` : ""}`)
     return { userLabel: store.get("userLabel"), agentLabel: store.get("agentLabel") }
   }
 

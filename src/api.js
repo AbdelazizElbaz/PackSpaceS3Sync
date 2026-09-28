@@ -47,9 +47,51 @@ function client() {
       Accept: "application/json",
       "X-Agent-Host": HOSTNAME,
       "X-Agent-Id": machineId(),
+      ...tenantHeaders(),
     },
     timeout: 30000,
   })
+}
+
+// ---------- multi-client (PrintIOS) ----------
+// Une seule API (api.printios.ma) sert tous les clients : chaque appel porte
+// l'en-tête X-Tenant (ResolveTenant côté API2 : slug, ou hôte résolu via les
+// sous-domaines / domaines propres). Sans valeur → aucun en-tête (API
+// Packspace mono-client inchangée).
+function tenantHeaders(tenant = store.get("tenant")) {
+  const t = normalizeTenant(tenant)
+  return t ? { "X-Tenant": t } : {}
+}
+
+// Saisie libre de l'utilisateur → valeur X-Tenant :
+//   "packspace"                          → "packspace" (slug)
+//   "packspace.printios.ma"              → hôte (sous-domaine ou domaine propre)
+//   "https://om.printios.ma/t/packspace" → "packspace" (lien d'accès /t/<slug>)
+//   "https://packspace.printios.ma/dashboard" → "packspace.printios.ma"
+function normalizeTenant(input) {
+  let t = String(input || "").trim().toLowerCase()
+  if (!t) return ""
+  if (/^https?:\/\//.test(t) || t.includes("/")) {
+    try {
+      const u = new URL(/^https?:\/\//.test(t) ? t : `https://${t}`)
+      const m = u.pathname.match(/^\/t\/([a-z0-9-]+)(?:\/|$)/)
+      t = m ? m[1] : u.hostname
+    } catch {
+      t = t.replace(/^https?:\/\//, "").split("/")[0]
+    }
+  }
+  return t.replace(/[^a-z0-9.-]/g, "")
+}
+
+// Vérifie l'espace client auprès de l'API (GET /tenancy/host, public) :
+// { found, slug, type } — found=false = espace inconnu.
+async function checkTenant(serverUrl, tenant) {
+  const base = normalizeServerUrl(serverUrl)
+  const t = normalizeTenant(tenant)
+  if (!t) return { found: false }
+  const q = t.includes(".") ? { host: t } : { slug: t }
+  const res = await axios.get(`${base}/tenancy/host`, { params: q, headers: { Accept: "application/json" }, timeout: 10000 })
+  return res.data || { found: false }
 }
 
 // Étape 1 : connexion classique (POST /login) → token de session 12 jours.
@@ -70,7 +112,7 @@ function normalizeServerUrl(input) {
 // Healthcheck GET /api/ping (public, voir routes/api.php). Renvoie
 // { ok, app, time, desktop_api } — desktop_api >= 2 signifie que les
 // endpoints agent-token / s3/browse / s3/objects sont déployés.
-async function ping(serverUrl) {
+async function ping(serverUrl, tenant = "") {
   const base = normalizeServerUrl(serverUrl)
   const res = await axios.get(`${base}/ping`, { headers: { Accept: "application/json" }, timeout: 10000 })
   const data = res.data || {}
@@ -78,11 +120,32 @@ async function ping(serverUrl) {
   // `desktop_api` → API Packspace reconnue, mais version à vérifier.
   const legacy = !data.ok && /API OK/i.test(String(data.message || ""))
   if (!data.ok && !legacy) throw new Error("Réponse inattendue : ce n'est pas une API Packspace.")
-  return { ok: true, desktop_api: 0, ...data, serverUrl: base, legacy }
+  const out = { ok: true, desktop_api: 0, ...data, serverUrl: base, legacy }
+  // API multi-client : l'espace est obligatoire, et on le vérifie tout de suite.
+  if (data.tenancy) {
+    const t = normalizeTenant(tenant)
+    out.tenant = t
+    if (!t) out.tenantRequired = true
+    else {
+      try {
+        out.tenantCheck = await checkTenant(base, t)
+      } catch {
+        out.tenantCheck = null // API sans /tenancy/host : vérifié à la connexion
+      }
+    }
+  }
+  return out
 }
 
-async function login(serverUrl, logon, password) {
+function tenantErrorMessage(tenant, apiMessage) {
+  return normalizeTenant(tenant)
+    ? `Espace client « ${normalizeTenant(tenant)} » inconnu sur cette API. ${apiMessage || ""}`.trim()
+    : "Cette API est multi-client (PrintIOS) : indiquez votre espace client (ex. packspace ou packspace.printios.ma)."
+}
+
+async function login(serverUrl, logon, password, tenant = "") {
   const base = normalizeServerUrl(serverUrl)
+  const th = tenantHeaders(tenant)
 
   // 1) COMPTE DE SERVICE de l'agent (Packspace → Synchronisation → « Comptes
   //    de l'agent ») : POST /desktop/agent/login renvoie directement le jeton
@@ -93,13 +156,17 @@ async function login(serverUrl, logon, password) {
     const svc = await axios.post(
       `${base}/desktop/agent/login`,
       { logon, password },
-      { headers: { Accept: "application/json" }, timeout: 15000 }
+      { headers: { Accept: "application/json", ...th }, timeout: 15000 }
     )
     if (svc.data?.success && svc.data?.data?.token) {
       return { ...svc.data.data, serverUrl: base }
     }
   } catch (err) {
     const status = err?.response?.status
+    // 404 « Tenant inconnu » (API multi-client) : inutile de retenter.
+    if (status === 404 && /tenant/i.test(String(err.response?.data?.message || ""))) {
+      throw new Error(tenantErrorMessage(tenant, err.response.data.message))
+    }
     if (status && status !== 401 && status !== 404 && status !== 405) {
       throw new Error(err.response?.data?.message || `Échec de connexion (${status})`)
     }
@@ -107,11 +174,20 @@ async function login(serverUrl, logon, password) {
   }
 
   // 2) Compte utilisateur admin / opérateur (ancien flux)
-  const res = await axios.post(
-    `${base}/login`,
-    { logon, password },
-    { headers: { Accept: "application/json" }, timeout: 15000 }
-  )
+  let res
+  try {
+    res = await axios.post(
+      `${base}/login`,
+      { logon, password },
+      { headers: { Accept: "application/json", ...th }, timeout: 15000 }
+    )
+  } catch (err) {
+    const status = err?.response?.status
+    const msg = String(err?.response?.data?.message || "")
+    if (status === 404 && /tenant/i.test(msg)) throw new Error(tenantErrorMessage(tenant, msg))
+    if (status === 403 || status === 402) throw new Error(msg || `Accès refusé (${status})`)
+    throw err
+  }
   if (!res.data?.success) {
     throw new Error(res.data?.message || "Échec de connexion")
   }
@@ -124,7 +200,7 @@ async function login(serverUrl, logon, password) {
   // session obtenue pour ne pas la laisser traîner.
   if (!AGENT_ROLES.includes(session.role)) {
     axios
-      .post(`${base}/logout`, {}, { headers: { Authorization: `Bearer ${session.token}` }, timeout: 5000 })
+      .post(`${base}/logout`, {}, { headers: { Authorization: `Bearer ${session.token}`, ...th }, timeout: 5000 })
       .catch(() => {})
     throw new Error("Ce compte n'est pas autorisé : utilisez un compte de l'agent (Packspace → Synchronisation → « Comptes de l'agent ») ou un compte administrateur/opérateur.")
   }
@@ -133,7 +209,7 @@ async function login(serverUrl, logon, password) {
     `${base}/desktop/agent-token`,
     {},
     {
-      headers: { Accept: "application/json", Authorization: `Bearer ${session.token}` },
+      headers: { Accept: "application/json", Authorization: `Bearer ${session.token}`, ...th },
       timeout: 15000,
     }
   )
@@ -273,6 +349,9 @@ module.exports = {
   machineId,
   APP_VERSION,
   normalizeServerUrl,
+  normalizeTenant,
+  tenantHeaders,
+  checkTenant,
   ping,
   login,
   fetchPendingFiles,

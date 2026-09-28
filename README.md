@@ -50,6 +50,24 @@ Le tooltip du tray résume l'activité (nb de fichiers, débit cumulé).
 Côté backend : `API2/app/Http/Controllers/DesktopFilesController.php`
 (`browse`, `listObjects`, `agentToken`), `S3FileController::presignDownload`.
 
+## Multi-client PrintIOS (API2 multi-tenant)
+
+Sur PrintIOS, **une seule API** (`https://api.printios.ma`) sert tous les
+clients ; l'espace client est transmis dans l'en-tête `X-Tenant` sur chaque
+appel (résolu côté API2 par `ResolveTenant` : slug, sous-domaine ou domaine
+propre). À la connexion, le champ **Espace client** accepte indifféremment :
+
+- le slug : `packspace` ;
+- l'hôte de l'espace : `packspace.printios.ma` ou un domaine propre
+  (`om.packspace.ma`) ;
+- le lien d'accès complet : `https://om.printios.ma/t/packspace` (démo).
+
+« Tester » interroge `GET /tenancy/host` (public) et signale un espace
+inconnu ; à la connexion, un 404 « tenant inconnu » est traduit en message
+clair. Champ vide = API Packspace dédiée (mono-client), comportement
+inchangé. La valeur est mémorisée (`tenant` dans la config, voir
+`src/store.js`) et rejouée par `api.client()` (`tenantHeaders()`).
+
 ## Pilotage depuis l'app B2B
 
 Depuis Packspace → Paramètres → **Synchro impression** (`/sync-agents`,
