@@ -447,6 +447,8 @@ ipcMain.handle("upload:pickFile", async () => {
   return { path: p, name: require("path").basename(p), size: fs.statSync(p).size }
 })
 ipcMain.handle("upload:getOrder", wrap(async (_e, orderId) => api.getOrder(orderId)))
+// Ouvre un fichier d'article (URL S3 présignée) dans le navigateur par défaut.
+ipcMain.handle("upload:openFile", wrap(async (_e, s3Key) => { const url = await api.fileUrl(s3Key); await shell.openExternal(url); return true }))
 ipcMain.handle("upload:start", wrap(async (_e, payload) => {
   const send = (p) => { if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send("upload:progress", { ...p, itemId: payload.itemId, kind: payload.kind }) }
   try {

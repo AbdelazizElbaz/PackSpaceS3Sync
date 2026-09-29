@@ -214,6 +214,10 @@ class Engine {
     return api.getOrder(orderId)
   }
 
+  fileUrl(s3Key) {
+    return api.fileUrl(s3Key)
+  }
+
   // Progression poussée via les listeners d'état (clé uploadProgress) pour
   // que la fenêtre affiche la barre — même mécanisme que les mises à jour.
   async uploadItemFile(payload) {
@@ -303,6 +307,7 @@ Engine.METHODS = [
   "login",
   "resolveTenant",
   "getOrder",
+  "fileUrl",
   "uploadItemFile",
   "logout",
   "browse",

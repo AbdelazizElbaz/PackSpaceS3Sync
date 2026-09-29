@@ -15,6 +15,7 @@ contextBridge.exposeInMainWorld("agent", {
   // Envoi de fichiers (conception / montage) sur une commande
   pickUploadFile: () => ipcRenderer.invoke("upload:pickFile"),
   getOrder: (orderId) => ipcRenderer.invoke("upload:getOrder", orderId),
+  openItemFile: (s3Key) => ipcRenderer.invoke("upload:openFile", s3Key),
   uploadItemFile: (payload) => ipcRenderer.invoke("upload:start", payload),
   onUploadProgress: (cb) => ipcRenderer.on("upload:progress", (_e, p) => cb(p)),
 

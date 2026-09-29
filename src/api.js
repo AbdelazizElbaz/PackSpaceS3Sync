@@ -39,8 +39,13 @@ const AGENT_ROLES = ["sync_agent", "admin", "operator"]
 // montage) sur les commandes — sans synchronisation S3 (réservée à
 // AGENT_ROLES) : un vendeur se connecte avec son compte habituel et
 // travaille sur ses commandes ; admin/opérateur ont les deux.
+// Mode UTILISATEUR (vendeur, admin, opérateur) : pas de synchronisation —
+// chargement d'une commande par son numéro, consultation et envoi des fichiers
+// des articles. La synchronisation S3 est réservée au compte de l'agent
+// (sync_agent). Demande explicite : « sync en mode utilisateur on retire la
+// synchronisation ».
 const UPLOAD_ROLES = ["vendeur", "admin", "operator"]
-const SYNC_ROLES = ["sync_agent", "admin", "operator"]
+const SYNC_ROLES = ["sync_agent"]
 
 // Client HTTP vers l'API Packspace (Laravel API2). Le token 'desktop-agent'
 // est rejoué sur chaque appel via Authorization: Bearer — l'agent est un
@@ -262,8 +267,8 @@ async function login(serverUrl, logon, password, tenant = "") {
     throw new Error("Ce compte n'est pas autorisé : utilisez un compte de l'agent (PrintIOS → Synchronisation → « Comptes de l'agent »), un compte administrateur/opérateur, ou un compte vendeur (envoi de fichiers).")
   }
 
-  // Vendeur : pas de jeton agent (réservé admin/opérateur côté API2), on
-  // garde le jeton de session (12 jours) — mode « envoi de fichiers » seul.
+  // Mode utilisateur (vendeur / admin / opérateur) : jeton de session
+  // (12 jours), pas de jeton agent ni de synchronisation.
   if (!SYNC_ROLES.includes(session.role)) {
     return { ...session, serverUrl: base, capabilities: { sync: false, upload: true } }
   }
@@ -303,9 +308,20 @@ async function getOrder(orderId) {
       category: it.product_category_name || "",
       quantity: it.quantity,
       print_file: it.printfile?.original_filename || it.printfile?.filename || null,
+      print_file_key: it.printfile?.s3url || null,
       design_file: it.designfile?.original_filename || it.designfile?.filename || null,
+      design_file_key: it.designfile?.s3url || null,
     })),
+    // Fichiers au niveau commande (fichier d'impression global, bon de livraison)
+    print_file: o.printfile?.original_filename || null,
+    print_file_key: o.printfile?.s3url || null,
   }
+}
+
+// URL présignée (15 min) pour OUVRIR un fichier d'article dans le navigateur
+// (POST /s3file/presignDownload, même endpoint que la synchro).
+async function fileUrl(s3Key) {
+  return presignDownload(s3Key)
 }
 
 // md5 hexadécimal d'un fichier (flux, sans le charger en mémoire).
@@ -568,6 +584,7 @@ module.exports = {
   ping,
   login,
   getOrder,
+  fileUrl,
   uploadItemFile,
   declareLocalCopy,
   lookupLocalCopies,

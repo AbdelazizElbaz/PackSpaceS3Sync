@@ -54,11 +54,15 @@ Côté backend : `API2/app/Http/Controllers/DesktopFilesController.php`
 
 Selon le compte connecté (voir `src/api.js`) :
 
-| Rôle | Synchronisation S3 (téléchargement des fichiers à imprimer) | Envoi de fichiers sur une commande |
+| Rôle | Synchronisation S3 (téléchargement des fichiers à imprimer) | Mode utilisateur : commande par n°, consulter / envoyer les fichiers des articles |
 |---|---|---|
 | `sync_agent` (compte de l'agent) | oui | non |
-| `admin`, `operator` | oui | oui |
-| `vendeur` | non (jeton de session 12 j, pas de jeton agent) | oui |
+| `admin`, `operator`, `vendeur` | **non** (mode utilisateur, jeton de session 12 j) | oui |
+
+En mode utilisateur, la synchronisation est entièrement masquée : on charge
+une commande par son numéro, chaque article affiche ses fichiers de
+conception et de montage (clic = ouverture dans le navigateur via une URL
+présignée, `POST /s3file/presignDownload`) et propose leur envoi.
 
 Le panneau « Envoyer des fichiers sur une commande » (haut de la colonne
 droite) : saisir le n° de commande → **Charger** (`GET /orders/{id}`, scopé

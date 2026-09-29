@@ -95,6 +95,7 @@
     // fonction réservée à l'application de bureau.
     pickUploadFile: async () => { window.alert("L'envoi de fichiers n'est disponible que dans l'application de bureau."); return null },
     getOrder: (orderId) => rpc("getOrder", [orderId]),
+    openItemFile: async (s3Key) => { const url = await rpc("fileUrl", [s3Key]); window.open(url, "_blank"); return true },
     uploadItemFile: (payload) => rpc("uploadItemFile", [payload]),
     onUploadProgress: () => {},
     onAuthPrefill: () => {},
