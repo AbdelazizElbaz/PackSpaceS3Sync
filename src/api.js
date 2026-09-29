@@ -342,8 +342,10 @@ async function listUnshippedOrders({ search = "", limit = 100 } = {}) {
 
 // URL présignée (15 min) pour OUVRIR un fichier d'article dans le navigateur
 // (POST /s3file/presignDownload, même endpoint que la synchro).
-async function fileUrl(s3Key) {
-  return presignDownload(s3Key)
+async function fileUrl(s3Key, displayName = null) {
+  const res = await client().post("/s3file/presignDownload", { filename: s3Key, expires: 20, download_name: displayName || undefined })
+  if (!res.data?.url) throw new Error("Pas d'URL présignée renvoyée")
+  return res.data.url
 }
 
 // md5 hexadécimal d'un fichier (flux, sans le charger en mémoire).

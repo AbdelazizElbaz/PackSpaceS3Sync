@@ -215,8 +215,8 @@ class Engine {
     return api.getOrder(orderId)
   }
 
-  fileUrl(s3Key) {
-    return api.fileUrl(s3Key)
+  fileUrl(s3Key, displayName = null) {
+    return api.fileUrl(s3Key, displayName)
   }
 
   listUnshippedOrders(opts) {

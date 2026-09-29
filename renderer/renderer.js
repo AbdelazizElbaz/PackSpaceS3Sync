@@ -804,13 +804,13 @@ function renderUploadOrder() {
   const box = $("uploadOrder")
   if (!uploadOrder) { box.innerHTML = ""; return }
   const o = uploadOrder
-  const meta = `<div class="order-meta">Commande <strong>#${o.id}</strong> · ${o.stat || ""}${o.reseller ? ` · ${o.reseller}` : ""}${o.date ? ` · ${String(o.date).slice(0, 10)}` : ""}${o.print_file ? ` · Fichier commande : <a href="#" data-open="${encodeURIComponent(o.print_file_key || "")}">${o.print_file}</a>` : ""}</div>`
+  const meta = `<div class="order-meta">Commande <strong>#${o.id}</strong> · ${o.stat || ""}${o.reseller ? ` · ${o.reseller}` : ""}${o.date ? ` · ${String(o.date).slice(0, 10)}` : ""}${o.print_file ? ` · Fichier commande : <a href="#" data-open="${encodeURIComponent(o.print_file_key || "")}" data-name="${encodeURIComponent(o.print_file)}">${o.print_file}</a>` : ""}</div>`
   const items = (o.items || []).map((it) => `<div class="upload-item" data-item="${it.id}">
       <div>
         <div class="item-name">${it.name}${it.quantity ? ` ×${it.quantity}` : ""}</div>
         <div class="item-files">
-          <span>Conception : ${it.design_file ? `<a href="#" data-open="${encodeURIComponent(it.design_file_key || "")}">${it.design_file}</a>` : "—"}</span>
-          <span>Montage / impression : ${it.print_file ? `<a href="#" data-open="${encodeURIComponent(it.print_file_key || "")}">${it.print_file}</a>` : "—"}</span>
+          <span>Conception : ${it.design_file ? `<a href="#" data-open="${encodeURIComponent(it.design_file_key || "")}" data-name="${encodeURIComponent(it.design_file)}">${it.design_file}</a>` : "—"}</span>
+          <span>Montage / impression : ${it.print_file ? `<a href="#" data-open="${encodeURIComponent(it.print_file_key || "")}" data-name="${encodeURIComponent(it.print_file)}">${it.print_file}</a>` : "—"}</span>
         </div>
       </div>
       <button class="small" data-upload="design" data-item="${it.id}">Fichier de conception…</button>
@@ -825,7 +825,8 @@ function renderUploadOrder() {
     e.preventDefault()
     const key = decodeURIComponent(a.dataset.open || "")
     if (!key) return
-    try { await window.agent.openItemFile(key) } catch (err) { $("uploadError").textContent = errMsg(err, "Impossible d'ouvrir le fichier.") }
+    const name = decodeURIComponent(a.dataset.name || "")
+    try { await window.agent.openItemFile(key, name) } catch (err) { $("uploadError").textContent = errMsg(err, "Impossible d'ouvrir le fichier.") }
   }))
 }
 
