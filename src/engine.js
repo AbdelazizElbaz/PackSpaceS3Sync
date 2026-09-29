@@ -129,6 +129,11 @@ class Engine {
     return api.ping(serverUrl, tenant)
   }
 
+  // Espace client → adresse d'API déduite + vérification (voir api.resolveServerForTenant).
+  resolveTenant(tenant, hint = "") {
+    return api.resolveServerForTenant(tenant, hint)
+  }
+
   // Vérifie la dernière version publiée (même source que la carte de
   // téléchargement du B2B) et renvoie de quoi la fenêtre affiche une
   // bannière ou la déclenche : { available, version, current, asset } —
@@ -179,6 +184,12 @@ class Engine {
   }
 
   async login({ serverUrl, logon, password, tenant = "" }) {
+    // Adresse d'API absente → déduite de l'espace client.
+    if (!serverUrl && tenant) {
+      const r = await api.resolveServerForTenant(tenant)
+      serverUrl = r.serverUrl
+      tenant = r.tenant
+    }
     const data = await api.login(serverUrl, logon, password, tenant)
     store.set("serverUrl", data.serverUrl || serverUrl)
     store.set("tenant", api.normalizeTenant(tenant))
@@ -290,6 +301,7 @@ Engine.METHODS = [
   "checkUpdate",
   "applyUpdate",
   "login",
+  "resolveTenant",
   "getOrder",
   "uploadItemFile",
   "logout",

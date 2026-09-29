@@ -28,14 +28,18 @@
   <!-- ---------- Connexion ---------- -->
   <section id="loginView" class="view login">
     <h2>Connexion</h2>
-    <label>Adresse de l'API</label>
+    <label>Espace client</label>
     <div class="dir-row">
-      <input id="serverUrl" type="text" placeholder="https://api.om.packspace.ma (le /api est ajouté automatiquement)" />
+      <input id="tenant" type="text" placeholder="packspace, packspace.printios.ma ou https://om.printios.ma/t/packspace" />
       <button id="pingBtn" class="small ghost" type="button">Tester</button>
     </div>
     <p id="pingResult" class="hint"></p>
-    <label>Espace client <span class="hint">(PrintIOS multi-client — laisser vide pour une API Packspace dédiée)</span></label>
-    <input id="tenant" type="text" placeholder="packspace, packspace.printios.ma ou https://om.printios.ma/t/packspace" />
+    <!-- Adresse de l'API : déduite de l'espace client (api.<domaine>), champ
+         avancé replié pour une API dédiée / un cas particulier. -->
+    <details class="advanced">
+      <summary class="hint">Avancé : adresse de l'API (déduite automatiquement de l'espace client)</summary>
+      <input id="serverUrl" type="text" placeholder="laisser vide = déduite (ex. https://api.printios.ma)" />
+    </details>
     <label>Identifiant</label>
     <input id="logon" type="text" placeholder="Identifiant Packspace" />
     <label>Mot de passe</label>

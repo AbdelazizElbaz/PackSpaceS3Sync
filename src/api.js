@@ -89,6 +89,49 @@ function normalizeTenant(input) {
   return t.replace(/[^a-z0-9.-]/g, "")
 }
 
+// API par défaut de la plateforme (PrintIOS). Surchargeable par variable
+// d'environnement (build dédié) ou par l'installeur (a_<hôte>, voir main.js).
+const DEFAULT_API_URL = (process.env.PRINTIOS_API_URL || "https://api.printios.ma").replace(/\/+$/, "")
+
+// Déduit l'adresse de l'API à partir de la saisie « espace client » — sur
+// demande : on n'affiche plus le champ API, il est déduit automatiquement.
+//   "packspace"                          → API par défaut (api.printios.ma)
+//   "packspace.printios.ma"              → https://api.printios.ma (api.<domaine parent>)
+//   "https://om.printios.ma/t/packspace" → idem, espace = packspace
+//   "om.packspace.ma" (domaine propre)   → https://api.om.packspace.ma (ancien Packspace
+//                                          dédié), sinon API par défaut
+// Chaque candidate est testée (GET /ping puis /tenancy/host) ; la première qui
+// reconnaît l'espace gagne. `hint` = adresse imposée (champ avancé / installeur).
+async function resolveServerForTenant(input, hint = "") {
+  const t = normalizeTenant(input)
+  if (!t) throw new Error("Indiquez votre espace client (ex. packspace ou packspace.printios.ma).")
+  const candidates = []
+  if (hint) candidates.push(normalizeServerUrl(hint))
+  const raw = String(input || "").trim()
+  const host = /^https?:\/\//.test(raw) || raw.includes("/") ? (() => { try { return new URL(/^https?:\/\//.test(raw) ? raw : `https://${raw}`).hostname } catch { return "" } })() : (t.includes(".") ? t : "")
+  if (host) {
+    const parts = host.split(".")
+    if (parts.length >= 3) candidates.push(`https://api.${parts.slice(1).join(".")}/api`) // sous-domaine → api.<parent>
+    candidates.push(`https://api.${host}/api`) // domaine propre → api.<domaine>
+  }
+  candidates.push(`${DEFAULT_API_URL}/api`)
+  const tried = []
+  for (const base of [...new Set(candidates)]) {
+    try {
+      const p = await axios.get(`${base}/ping`, { headers: { Accept: "application/json" }, timeout: 6000 })
+      const data = p.data || {}
+      if (!data.ok && !/API OK/i.test(String(data.message || ""))) { tried.push(`${base} : réponse inattendue`); continue }
+      if (!data.tenancy) return { serverUrl: base, tenant: "", tenancy: false } // API dédiée mono-client
+      const check = await checkTenant(base, t).catch(() => ({ found: false }))
+      if (check?.found) return { serverUrl: base, tenant: t, tenancy: true, check }
+      tried.push(`${base} : espace « ${t} » inconnu`)
+    } catch (err) {
+      tried.push(`${base} : ${err?.message || "injoignable"}`)
+    }
+  }
+  throw new Error(`Espace client « ${t} » introuvable. Essais : ${tried.join(" ; ")}`)
+}
+
 // Vérifie l'espace client auprès de l'API (GET /tenancy/host, public) :
 // { found, slug, type } — found=false = espace inconnu.
 async function checkTenant(serverUrl, tenant) {
@@ -512,6 +555,8 @@ module.exports = {
   normalizeTenant,
   tenantHeaders,
   checkTenant,
+  resolveServerForTenant,
+  DEFAULT_API_URL,
   ping,
   login,
   getOrder,

@@ -330,12 +330,22 @@ $("pingBtn").addEventListener("click", async () => {
   out.className = "hint"
   out.textContent = "Test en cours…"
   try {
-    const r = await window.agent.ping($("serverUrl").value.trim(), $("tenant").value.trim())
+    // Espace client saisi → l'adresse de l'API est déduite (sauf champ avancé
+    // renseigné) et vérifiée ; l'API retenue est affichée.
+    const tenantIn = $("tenant").value.trim()
+    let serverUrl = $("serverUrl").value.trim()
+    if (tenantIn) {
+      const res = await window.agent.resolveTenant(tenantIn, serverUrl)
+      serverUrl = res.serverUrl
+      $("serverUrl").value = serverUrl
+    }
+    if (!serverUrl) throw new Error("Indiquez votre espace client.")
+    const r = await window.agent.ping(serverUrl, tenantIn)
     const recent = Number(r.desktop_api || 0) >= 2
     let ok = recent
     let text = recent
-      ? `OK — ${r.app || "API"} répond sur ${r.serverUrl}`
-      : `L'API répond (${r.serverUrl}) mais sans les endpoints de synchro S3 : redéployer API2.`
+      ? `OK — ${r.app || "API"} répond`
+      : `L'API répond mais sans les endpoints de synchro S3 : redéployer API2.`
     // API multi-client (PrintIOS) : l'espace client est obligatoire et vérifié.
     if (r.tenancy) {
       if (r.tenantRequired) {
@@ -351,7 +361,7 @@ $("pingBtn").addEventListener("click", async () => {
       }
     }
     out.className = ok ? "hint ok" : "hint err"
-    out.textContent = text
+    out.textContent = `${text} · API : ${r.serverUrl}`
   } catch (e) {
     out.className = "hint err"
     out.textContent = e?.message || "Échec du test."
@@ -365,8 +375,8 @@ $("loginBtn").addEventListener("click", async () => {
   const tenant = $("tenant").value.trim()
   const logon = $("logon").value.trim()
   const password = $("password").value
-  if (!serverUrl || !logon || !password) {
-    err.textContent = "Tous les champs sont obligatoires."
+  if ((!serverUrl && !tenant) || !logon || !password) {
+    err.textContent = "Espace client, identifiant et mot de passe sont obligatoires."
     return
   }
   const btn = $("loginBtn")
@@ -798,6 +808,14 @@ window.agent.onUploadProgress((p) => {
 // ---------- init ----------
 
 window.agent.onStateUpdate(render)
+// Lien printios-sync://connect?api=…&tenant=…&logon=… depuis le navigateur :
+// remplit l'écran de connexion (l'utilisateur n'a plus que le mot de passe).
+if (window.agent.onAuthPrefill) window.agent.onAuthPrefill((p) => {
+  if (p?.serverUrl) $("serverUrl").value = p.serverUrl
+  if (p?.tenant) $("tenant").value = p.tenant
+  if (p?.logon) $("logon").value = p.logon
+  $("password").focus()
+})
 window.agent.onAuthLost(async () => {
   await refreshConfig()
   $("loginError").textContent = "Session terminée : ce poste a été supprimé depuis Packspace ou le jeton a expiré. Reconnectez-vous."

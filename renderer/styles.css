@@ -1,3 +1,8 @@
+/* ---------- connexion : champ API avancé ---------- */
+details.advanced { margin: 4px 0 8px; }
+details.advanced summary { cursor: pointer; }
+details.advanced input { margin-top: 6px; }
+
 /* ---------- envoi de fichiers (conception / montage) ---------- */
 .upload-panel { border-bottom: 1px solid var(--border, #2a2f3a); padding-bottom: 10px; margin-bottom: 10px; }
 .upload-panel .pane-head input { width: 200px; }

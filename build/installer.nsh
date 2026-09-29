@@ -63,6 +63,19 @@
 ; instances, manifestes) est dans AppData/ProgramData et n'est jamais
 ; touchée (/KEEP_APP_DATA) — sur demande : "on ne doit pas perdre les
 ; credentials déjà sauvegardés".
+; Nom de l'installeur téléchargé (ex. PackSpace-S3-Sync-1.2.3-win-x64-t_packspace-a_api.printios.ma.exe)
+; écrit dans $INSTDIR\install-source.txt : au premier lancement, l'agent y
+; lit l'espace client (t_…) et l'hôte de l'API (a_…) et pré-remplit l'écran de
+; connexion (voir src/main.js bootstrapFromInstaller). Best effort.
+!macro customInstall
+  ClearErrors
+  FileOpen $0 "$INSTDIR\install-source.txt" w
+  ${ifNot} ${Errors}
+    FileWrite $0 "$EXEFILE"
+    FileClose $0
+  ${endif}
+!macroend
+
 !macro customUnInstall
   ${ifNot} ${isUpdated}
     DetailPrint "Packspace : signalement de la désinstallation…"

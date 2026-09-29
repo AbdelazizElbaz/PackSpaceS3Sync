@@ -32,6 +32,12 @@
   "build": {
     "appId": "ma.packspace.s3sync",
     "productName": "PackSpace S3 Sync",
+    "protocols": [
+      {
+        "name": "PrintIOS Sync",
+        "schemes": ["printios-sync", "packspace-sync"]
+      }
+    ],
     "directories": {
       "output": "release"
     },

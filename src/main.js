@@ -275,13 +275,68 @@ function startBackend() {
   startPeerServer()
 }
 
+// ---------- pré-remplissage de la connexion ----------
+// 1) Nom de l'installeur (install-source.txt écrit par NSIS, voir
+//    build/installer.nsh) : « …-t_<espace>-a_<hôte api>.exe » → adresse de
+//    l'API + espace client, si rien n'est encore configuré.
+// 2) Lien depuis le navigateur (page Synchronisation du B2B) :
+//    printios-sync://connect?api=https://api.printios.ma&tenant=packspace[&logon=…]
+//    → mêmes champs, poussés à l'écran de connexion (auth:prefill).
+function parseInstallerName(name) {
+  const t = /-t_([a-z0-9.-]+)/i.exec(name || "")
+  const a = /-a_([a-z0-9.-]+)/i.exec(name || "")
+  if (!t && !a) return null
+  return { tenant: t ? t[1] : "", serverUrl: a ? `https://${a[1]}` : "" }
+}
+function bootstrapFromInstaller() {
+  try {
+    if (store.get("serverUrl") || store.get("bootstrapDone")) return
+    const fs = require("fs")
+    const candidates = [path.join(path.dirname(process.execPath), "install-source.txt"), path.join(process.resourcesPath || "", "..", "install-source.txt")]
+    for (const f of candidates) {
+      if (!fs.existsSync(f)) continue
+      const parsed = parseInstallerName(fs.readFileSync(f, "utf8").trim())
+      store.set("bootstrapDone", true)
+      if (!parsed) return
+      if (parsed.serverUrl) store.set("serverUrl", parsed.serverUrl)
+      if (parsed.tenant) store.set("tenant", parsed.tenant)
+      return
+    }
+  } catch {
+    // best effort
+  }
+}
+function handleDeepLink(rawUrl) {
+  try {
+    const u = new URL(String(rawUrl || ""))
+    if (!["printios-sync:", "packspace-sync:"].includes(u.protocol)) return
+    const api = u.searchParams.get("api") || ""
+    const tenant = u.searchParams.get("tenant") || ""
+    const logon = u.searchParams.get("logon") || ""
+    if (api) store.set("serverUrl", api)
+    if (tenant) store.set("tenant", tenant)
+    createWindow()
+    const push = () => { if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send("auth:prefill", { serverUrl: api, tenant, logon }) }
+    if (mainWindow?.webContents.isLoading()) mainWindow.webContents.once("did-finish-load", push)
+    else setTimeout(push, 300)
+  } catch {
+    // lien invalide : ignoré
+  }
+}
+const deepLinkArg = (argv) => (argv || []).find((a) => /^(printios-sync|packspace-sync):\/\//i.test(a))
+
 app.whenReady().then(() => {
   // Requis sur Windows pour que les notifications système s'affichent
   // (doit correspondre à build.appId dans package.json).
   if (process.platform === "win32") app.setAppUserModelId("ma.packspace.s3sync")
+  // Liens printios-sync:// depuis le navigateur (voir handleDeepLink)
+  try { app.setAsDefaultProtocolClient("printios-sync"); app.setAsDefaultProtocolClient("packspace-sync") } catch { /* ignore */ }
+  bootstrapFromInstaller()
   buildTray()
   createWindow()
   startBackend()
+  const link = deepLinkArg(process.argv)
+  if (link) handleDeepLink(link)
   scheduleUpdateNotifications()
 
   if (store.get("autoLaunch")) {
@@ -291,7 +346,13 @@ app.whenReady().then(() => {
   }
 })
 
-app.on("second-instance", () => createWindow())
+app.on("second-instance", (_e, argv) => {
+  const link = deepLinkArg(argv)
+  if (link) handleDeepLink(link)
+  else createWindow()
+})
+// macOS : le lien arrive par open-url
+app.on("open-url", (event, url) => { event.preventDefault(); handleDeepLink(url) })
 
 app.on("window-all-closed", (event) => {
   // App "tray" : ne quitte jamais seule.
@@ -414,6 +475,7 @@ ipcMain.handle("auth:login", wrap(async (_e, payload) => {
   return out
 }))
 
+ipcMain.handle("auth:resolveTenant", wrap(async (_e, tenant, hint = "") => backend.call("resolveTenant", [tenant, hint], 40000)))
 ipcMain.handle("auth:ping", async (_e, serverUrl, tenant = "") => {
   try {
     return await backend.call("ping", [serverUrl, tenant])

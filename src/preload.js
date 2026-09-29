@@ -8,6 +8,7 @@ contextBridge.exposeInMainWorld("agent", {
   chooseDir: () => ipcRenderer.invoke("config:chooseDir"),
   setAutoLaunch: (enabled) => ipcRenderer.invoke("config:setAutoLaunch", enabled),
   ping: (serverUrl, tenant) => ipcRenderer.invoke("auth:ping", serverUrl, tenant),
+  resolveTenant: (tenant, hint) => ipcRenderer.invoke("auth:resolveTenant", tenant, hint),
   login: (payload) => ipcRenderer.invoke("auth:login", payload),
   logout: () => ipcRenderer.invoke("auth:logout"),
 
@@ -45,6 +46,8 @@ contextBridge.exposeInMainWorld("agent", {
   checkUpdate: () => ipcRenderer.invoke("update:check"),
   applyUpdate: () => ipcRenderer.invoke("update:apply"),
 
+  // Pré-remplissage de la connexion (lien printios-sync:// depuis le navigateur)
+  onAuthPrefill: (cb) => ipcRenderer.on("auth:prefill", (_e, p) => cb(p)),
   onAuthLost: (callback) => {
     const listener = () => callback()
     ipcRenderer.on("auth:lost", listener)

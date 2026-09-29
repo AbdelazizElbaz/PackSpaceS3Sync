@@ -100,12 +100,37 @@ en impression, `CopyOrderFilesToPrintJob` reporte la copie locale sur la clé
 transport est HTTP en clair sur le LAN (jeton pair + md5) — pas de TLS,
 sinon il faudrait un certificat par poste.
 
+## Installation pré-configurée (espace client détecté)
+
+Deux mécanismes, complémentaires :
+
+1. **Nom de l'installeur.** Téléchargé depuis la page Synchronisation d'un
+   espace, l'installeur s'appelle
+   `PackSpace-S3-Sync-1.2.3-win-x64-t_<espace>-a_<hôte api>.exe` (même
+   binaire S3, nom posé par le `Content-Disposition` présigné, voir API2
+   `DesktopSyncController::installerSuffix`). À l'installation, NSIS écrit ce
+   nom dans `install-source.txt` (`build/installer.nsh`, `customInstall`) ;
+   au premier lancement, si rien n'est configuré, l'agent pré-remplit
+   l'adresse de l'API et l'espace client (`src/main.js`
+   `bootstrapFromInstaller`).
+2. **Lien depuis le navigateur.** La page Synchronisation propose « Connecter
+   l'agent installé à cet espace » →
+   `printios-sync://connect?api=https://api.printios.ma&tenant=<espace>[&logon=…]`
+   (schéma enregistré par l'agent : `protocols` dans `package.json`,
+   `app.setAsDefaultProtocolClient`). L'agent s'ouvre avec les champs
+   pré-remplis (`auth:prefill`), il ne reste que le mot de passe.
+
 ## Multi-client PrintIOS (API2 multi-tenant)
 
 Sur PrintIOS, **une seule API** (`https://api.printios.ma`) sert tous les
 clients ; l'espace client est transmis dans l'en-tête `X-Tenant` sur chaque
 appel (résolu côté API2 par `ResolveTenant` : slug, sous-domaine ou domaine
-propre). À la connexion, le champ **Espace client** accepte indifféremment :
+propre). À la connexion, on saisit seulement l'**Espace client** — l'adresse de l'API
+est **déduite** (`api.resolveServerForTenant` : `api.<domaine parent>` pour
+`packspace.printios.ma`, `api.<domaine>` pour un domaine propre, sinon l'API
+par défaut `https://api.printios.ma`, chaque candidate vérifiée par `/ping` +
+`/tenancy/host`) ; un champ « Avancé » permet de l'imposer. Le champ accepte
+indifféremment :
 
 - le slug : `packspace` ;
 - l'hôte de l'espace : `packspace.printios.ma` ou un domaine propre
