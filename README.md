@@ -100,6 +100,17 @@ en impression, `CopyOrderFilesToPrintJob` reporte la copie locale sur la clé
 transport est HTTP en clair sur le LAN (jeton pair + md5) — pas de TLS,
 sinon il faudrait un certificat par poste.
 
+## Publication (Release) et numéro de version
+
+Workflow `.github/workflows/release.yml` : lancé **sans numéro** (« Run
+workflow »), il prend le dernier tag `vX.Y.Z` du dépôt et **incrémente le
+dernier chiffre** (2.0.6 → 2.0.7), construit les installeurs avec ce numéro
+(`npm version`), publie sur S3 puis pose le tag `v2.0.7` sur le commit —
+le prochain lancement repart de là. Un numéro saisi ou un tag poussé à la
+main restent prioritaires. La version installée est affichée dans le
+bandeau et le titre de la fenêtre de l'agent, dans l'info-bulle du tray,
+et par poste dans PrintIOS → Synchronisation (`app_version`).
+
 ## Installation pré-configurée (espace client détecté)
 
 Deux mécanismes, complémentaires :

@@ -313,7 +313,12 @@ async function refreshConfig() {
   const c = await window.agent.getConfig()
   $("modeBadge").classList.toggle("hidden", !["service", "web"].includes(c.mode))
   renderServiceBanner(c.serviceUnreachable)
-  if (c.appVersion) $("appVersion").textContent = `v${c.appVersion}`
+  if (c.appVersion) {
+    // Version visible partout : bandeau, titre de la fenêtre (barre des
+    // tâches) — même version que celle publiée par le workflow Release.
+    $("appVersion").textContent = `v${c.appVersion}`
+    document.title = `PrintIOS Sync v${c.appVersion}`
+  }
   if (c.isLoggedIn) {
     $("loginView").classList.add("hidden")
     $("mainView").classList.remove("hidden")
