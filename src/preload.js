@@ -13,11 +13,16 @@ contextBridge.exposeInMainWorld("agent", {
   logout: () => ipcRenderer.invoke("auth:logout"),
 
   // Envoi de fichiers (conception / montage) sur une commande
-  pickUploadFile: () => ipcRenderer.invoke("upload:pickFile"),
+  pickUploadFile: (opts) => ipcRenderer.invoke("upload:pickFile", opts || {}),
   getOrder: (orderId) => ipcRenderer.invoke("upload:getOrder", orderId),
   openItemFile: (s3Key) => ipcRenderer.invoke("upload:openFile", s3Key),
-  uploadItemFile: (payload) => ipcRenderer.invoke("upload:start", payload),
-  onUploadProgress: (cb) => ipcRenderer.on("upload:progress", (_e, p) => cb(p)),
+  // File d'envoi (plusieurs fichiers en même temps, arrière-plan)
+  enqueueUpload: (payload) => ipcRenderer.invoke("upload:enqueue", payload),
+  uploadQueue: () => ipcRenderer.invoke("upload:queue"),
+  retryUpload: (id) => ipcRenderer.invoke("upload:retry", id),
+  removeUpload: (id) => ipcRenderer.invoke("upload:remove", id),
+  clearDoneUploads: () => ipcRenderer.invoke("upload:clearDone"),
+  onUploadQueue: (cb) => ipcRenderer.on("upload:queue", (_e, jobs) => cb(jobs)),
 
   // Explorateur S3 (PrintProd)
   browse: (prefix) => ipcRenderer.invoke("s3:browse", prefix),

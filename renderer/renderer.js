@@ -777,25 +777,33 @@ $("pauseBtn").addEventListener("click", async () => {
 })
 
 // ---------- envoi de fichiers (conception / montage) ----------
+// File d'envoi côté processus principal (src/uploadQueue.js) : plusieurs
+// fichiers en même temps, en arrière-plan ; ici on affiche l'état.
 let uploadOrder = null
-const uploadStatus = {} // `${itemId}:${kind}` → { bytes, size, done, error, name }
+let uploadJobs = [] // état complet de la file (upload:queue)
+
+const KIND_LABEL = { design: "Conception", print: "Montage" }
+
+function jobForItem(itemId, kind) {
+  return uploadJobs.find((j) => j.itemId === Number(itemId) && j.kind === kind && j.orderId === Number(uploadOrder?.id))
+}
+
+function jobStatusHtml(j) {
+  if (!j) return ""
+  const label = KIND_LABEL[j.kind] || j.kind
+  if (j.status === "error") return `<div class="item-status err">${label} : ${j.error || "échec"} <button class="small ghost" data-retry="${j.id}">Réessayer</button></div>`
+  if (j.status === "done") return `<div class="item-status ok">${label} envoyé : ${j.name}</div>`
+  if (j.status === "queued") return `<div class="item-status">${label} : en attente (${j.name})${j.error ? ` — ${j.error}` : ""}</div>`
+  const pct = j.size ? Math.round((j.bytes / j.size) * 100) : 0
+  return `<progress max="100" value="${pct}"></progress><div class="item-status">${label} : ${pct}% (${fmtBytes(j.bytes)} / ${fmtBytes(j.size)}${j.speed ? ` · ${fmtBytes(j.speed)}/s` : ""})</div>`
+}
 
 function renderUploadOrder() {
   const box = $("uploadOrder")
-  if (!uploadOrder) { box.innerHTML = "" ; return }
+  if (!uploadOrder) { box.innerHTML = ""; return }
   const o = uploadOrder
   const meta = `<div class="order-meta">Commande <strong>#${o.id}</strong> · ${o.stat || ""}${o.reseller ? ` · ${o.reseller}` : ""}${o.date ? ` · ${String(o.date).slice(0, 10)}` : ""}${o.print_file ? ` · Fichier commande : <a href="#" data-open="${encodeURIComponent(o.print_file_key || "")}">${o.print_file}</a>` : ""}</div>`
-  const items = (o.items || []).map((it) => {
-    const st = (kind) => uploadStatus[`${it.id}:${kind}`]
-    const bar = (kind) => {
-      const s = st(kind)
-      if (!s) return ""
-      if (s.error) return `<div class="item-status err">${kind === "design" ? "Conception" : "Montage"} : ${s.error}</div>`
-      if (s.done) return `<div class="item-status ok">${kind === "design" ? "Conception" : "Montage"} envoyé : ${s.name || ""}</div>`
-      const pct = s.size ? Math.round((s.bytes / s.size) * 100) : 0
-      return `<progress max="100" value="${pct}"></progress><div class="item-status">${kind === "design" ? "Conception" : "Montage"} : ${pct}% (${fmtBytes(s.bytes)} / ${fmtBytes(s.size)})</div>`
-    }
-    return `<div class="upload-item" data-item="${it.id}">
+  const items = (o.items || []).map((it) => `<div class="upload-item" data-item="${it.id}">
       <div>
         <div class="item-name">${it.name}${it.quantity ? ` ×${it.quantity}` : ""}</div>
         <div class="item-files">
@@ -805,11 +813,11 @@ function renderUploadOrder() {
       </div>
       <button class="small" data-upload="design" data-item="${it.id}">Fichier de conception…</button>
       <button class="small primary" data-upload="print" data-item="${it.id}">Fichier de montage…</button>
-      ${bar("design")}${bar("print")}
-    </div>`
-  }).join("")
+      ${jobStatusHtml(jobForItem(it.id, "design"))}${jobStatusHtml(jobForItem(it.id, "print"))}
+    </div>`).join("")
   box.innerHTML = meta + (items || `<p class="empty">Aucun article sur cette commande.</p>`)
   box.querySelectorAll("button[data-upload]").forEach((b) => b.addEventListener("click", () => startUpload(Number(b.dataset.item), b.dataset.upload)))
+  box.querySelectorAll("button[data-retry]").forEach((b) => b.addEventListener("click", () => window.agent.retryUpload(b.dataset.retry)))
   // Fichiers déjà rattachés : clic = ouverture (URL présignée) dans le navigateur.
   box.querySelectorAll("a[data-open]").forEach((a) => a.addEventListener("click", async (e) => {
     e.preventDefault()
@@ -819,6 +827,33 @@ function renderUploadOrder() {
   }))
 }
 
+// Liste globale des envois (toutes commandes) sous le panneau.
+function renderUploadQueue() {
+  const box = $("uploadQueue")
+  if (!box) return
+  const active = uploadJobs.filter((j) => j.status !== "done")
+  const done = uploadJobs.filter((j) => j.status === "done")
+  $("uploadQueueSummary").textContent = active.length
+    ? `${uploadJobs.filter((j) => j.status === "uploading").length} en cours · ${uploadJobs.filter((j) => j.status === "queued").length} en attente · ${uploadJobs.filter((j) => j.status === "error").length} en erreur`
+    : (done.length ? `${done.length} terminé(s)` : "")
+  if (!uploadJobs.length) { box.innerHTML = `<p class="empty">Aucun envoi.</p>`; return }
+  box.innerHTML = uploadJobs.map((j) => {
+    const pct = j.size ? Math.round((j.bytes / j.size) * 100) : 0
+    const state = j.status === "uploading" ? `${pct}%${j.speed ? ` · ${fmtBytes(j.speed)}/s` : ""}` : j.status === "queued" ? "en attente" : j.status === "done" ? "envoyé" : "erreur"
+    return `<div class="queue-row ${j.status}">
+      <div class="queue-main"><strong>#${j.orderId}</strong> · article ${j.itemId} · ${KIND_LABEL[j.kind] || j.kind} · ${j.name} <span class="hint">(${fmtBytes(j.size)})</span></div>
+      <div class="queue-state">${state}${j.status === "error" ? ` — ${j.error || ""}` : ""}</div>
+      ${j.status === "uploading" ? `<progress max="100" value="${pct}"></progress>` : ""}
+      <div class="queue-actions">
+        ${j.status === "error" ? `<button class="small" data-retry="${j.id}">Réessayer</button>` : ""}
+        ${j.status !== "uploading" ? `<button class="small ghost" data-remove="${j.id}">Retirer</button>` : ""}
+      </div>
+    </div>`
+  }).join("")
+  box.querySelectorAll("button[data-retry]").forEach((b) => b.addEventListener("click", () => window.agent.retryUpload(b.dataset.retry)))
+  box.querySelectorAll("button[data-remove]").forEach((b) => b.addEventListener("click", () => window.agent.removeUpload(b.dataset.remove)))
+}
+
 async function loadUploadOrder() {
   const err = $("uploadError")
   err.textContent = ""
@@ -826,7 +861,6 @@ async function loadUploadOrder() {
   if (!id) return
   try {
     uploadOrder = await window.agent.getOrder(id)
-    Object.keys(uploadStatus).forEach((k) => delete uploadStatus[k])
     renderUploadOrder()
   } catch (e) {
     uploadOrder = null
@@ -835,32 +869,33 @@ async function loadUploadOrder() {
   }
 }
 
+// Ajoute un envoi à la file et rend la main tout de suite : l'utilisateur
+// peut enchaîner sur un autre article / une autre commande.
 async function startUpload(itemId, kind) {
   const file = await window.agent.pickUploadFile()
   if (!file || !uploadOrder) return
-  const key = `${itemId}:${kind}`
-  uploadStatus[key] = { bytes: 0, size: file.size, name: file.name }
-  renderUploadOrder()
   try {
-    await window.agent.uploadItemFile({ orderId: uploadOrder.id, itemId, filePath: file.path, kind })
-    // Recharge la commande pour afficher le fichier rattaché.
-    const fresh = await window.agent.getOrder(uploadOrder.id)
-    uploadOrder = fresh
-    uploadStatus[key] = { ...uploadStatus[key], done: true }
+    await window.agent.enqueueUpload({ orderId: uploadOrder.id, itemId, filePath: file.path, kind })
   } catch (e) {
-    uploadStatus[key] = { ...uploadStatus[key], error: errMsg(e, "Échec de l'envoi.") }
+    $("uploadError").textContent = errMsg(e, "Impossible d'ajouter l'envoi.")
   }
-  renderUploadOrder()
 }
 
 $("uploadLoadBtn").addEventListener("click", loadUploadOrder)
 $("uploadOrderId").addEventListener("keydown", (e) => { if (e.key === "Enter") loadUploadOrder() })
-window.agent.onUploadProgress((p) => {
-  const key = `${p.itemId}:${p.kind}`
-  if (!uploadStatus[key]) return
-  uploadStatus[key] = { ...uploadStatus[key], ...p }
+$("uploadClearDoneBtn")?.addEventListener("click", () => window.agent.clearDoneUploads())
+let refreshOrderTimer = null
+window.agent.onUploadQueue((jobs) => {
+  const before = uploadJobs
+  uploadJobs = Array.isArray(jobs) ? jobs : []
+  renderUploadQueue()
   renderUploadOrder()
+  // Un envoi de la commande affichée vient de se terminer → recharge pour
+  // afficher le fichier rattaché.
+  const finishedNow = uploadJobs.some((j) => j.status === "done" && j.orderId === Number(uploadOrder?.id) && before.find((b) => b.id === j.id)?.status !== "done")
+  if (finishedNow) { clearTimeout(refreshOrderTimer); refreshOrderTimer = setTimeout(loadUploadOrder, 400) }
 })
+window.agent.uploadQueue?.().then((jobs) => { uploadJobs = jobs || []; renderUploadQueue() }).catch(() => {})
 
 // ---------- init ----------
 
