@@ -68,8 +68,14 @@ Le panneau « Envoyer des fichiers sur une commande » (haut de la colonne
 droite) : saisir le n° de commande → **Charger** (`GET /orders/{id}`, scopé
 côté API2 : un vendeur ne voit que ses commandes) → pour chaque article,
 **Fichier de conception…** (`POST orders/{o}/items/{i}/design-file`) ou
-**Fichier de montage…** (`POST …/items/{i}/file`). Le fichier part en
-multipart présigné vers S3 (`s3file/initMultipart` / `signPart` /
+**Fichier de montage…** (`POST …/items/{i}/file`). Chaque envoi rejoint une **file
+d'attente en arrière-plan** (`src/uploadQueue.js`) : plusieurs fichiers
+peuvent être lancés à la suite sans attendre, 2 fichiers partent en même
+temps (4 morceaux en parallèle chacun), les autres suivent ; 3 tentatives
+automatiques par fichier, puis « Réessayer » ; la file est persistée dans la
+config et reprend après un redémarrage de l'agent (le fichier doit encore
+exister sur le poste) ; la liste « Envois » sous le panneau montre l'état de
+tous les envois. Le fichier part en multipart présigné vers S3 (`s3file/initMultipart` / `signPart` /
 `completeMultipart`, 4 parties en parallèle, 3 tentatives par partie —
 même flux que le front web), depuis le processus principal (droits de
 l'utilisateur sur ses fichiers, même en mode service), avec barre de

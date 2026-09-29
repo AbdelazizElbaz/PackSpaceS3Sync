@@ -1,3 +1,11 @@
+/* ---------- file d'envoi ---------- */
+.upload-queue { display: grid; gap: 4px; max-height: 220px; overflow: auto; }
+.queue-row { display: grid; grid-template-columns: 1fr auto auto; gap: 6px 10px; align-items: center; padding: 6px 10px; border: 1px solid var(--border, #2a2f3a); border-radius: 6px; font-size: 12px; }
+.queue-row progress { grid-column: 1 / -1; height: 5px; width: 100%; }
+.queue-row.done .queue-state { color: #3fb950; }
+.queue-row.error .queue-state { color: #f85149; }
+.queue-row .queue-actions { display: flex; gap: 4px; }
+
 /* ---------- connexion : espace détecté ---------- */
 .tenant-card { display: flex; align-items: center; gap: 8px; padding: 8px 10px; margin: 6px 0 10px; border: 1px solid var(--border, #2a2f3a); border-radius: 8px; }
 .tenant-badge { font-size: 11px; text-transform: uppercase; letter-spacing: .04em; opacity: .7; }

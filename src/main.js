@@ -332,6 +332,7 @@ app.whenReady().then(() => {
   // Liens printios-sync:// depuis le navigateur (voir handleDeepLink)
   try { app.setAsDefaultProtocolClient("printios-sync"); app.setAsDefaultProtocolClient("packspace-sync") } catch { /* ignore */ }
   bootstrapFromInstaller()
+  if (store.get("token")) getUploadQueue() // reprend les envois en attente
   buildTray()
   createWindow()
   startBackend()
@@ -433,9 +434,23 @@ ipcMain.handle("config:chooseDir", async () => {
 // Exécuté dans le processus principal (pas dans le service) : le fichier est
 // choisi par l'utilisateur dans SA session, avec ses droits d'accès ; la
 // progression est poussée à la fenêtre (upload:progress).
-ipcMain.handle("upload:pickFile", async () => {
+// File d'envoi (voir src/uploadQueue.js) : plusieurs fichiers en même temps,
+// en arrière-plan, relances automatiques, reprise après redémarrage.
+let uploadQueue = null
+function getUploadQueue() {
+  if (!uploadQueue) {
+    const { UploadQueue } = require("./uploadQueue")
+    uploadQueue = new UploadQueue({
+      onChange: (jobs) => { if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send("upload:queue", jobs) },
+      log: (level, message) => console[level === "error" ? "error" : "log"](message),
+    })
+  }
+  return uploadQueue
+}
+
+ipcMain.handle("upload:pickFile", async (_e, { multiple = false } = {}) => {
   const res = await dialog.showOpenDialog(mainWindow, {
-    properties: ["openFile"],
+    properties: multiple ? ["openFile", "multiSelections"] : ["openFile"],
     filters: [
       { name: "Fichiers d'impression / conception", extensions: ["pdf", "ai", "eps", "psd", "tif", "tiff", "png", "jpg", "jpeg", "svg", "cdr", "zip"] },
       { name: "Tous les fichiers", extensions: ["*"] },
@@ -443,24 +458,19 @@ ipcMain.handle("upload:pickFile", async () => {
   })
   if (res.canceled || !res.filePaths[0]) return null
   const fs = require("fs")
-  const p = res.filePaths[0]
-  return { path: p, name: require("path").basename(p), size: fs.statSync(p).size }
+  const files = res.filePaths.map((p) => ({ path: p, name: require("path").basename(p), size: fs.statSync(p).size }))
+  return multiple ? files : files[0]
 })
+ipcMain.handle("upload:enqueue", wrap(async (_e, payload) => getUploadQueue().enqueue(payload)))
+ipcMain.handle("upload:queue", async () => getUploadQueue().list())
+ipcMain.handle("upload:retry", async (_e, id) => { getUploadQueue().retry(id); return true })
+ipcMain.handle("upload:remove", async (_e, id) => { getUploadQueue().remove(id); return true })
+ipcMain.handle("upload:clearDone", async () => { getUploadQueue().clearDone(); return true })
 ipcMain.handle("upload:getOrder", wrap(async (_e, orderId) => api.getOrder(orderId)))
 // Ouvre un fichier d'article (URL S3 présignée) dans le navigateur par défaut.
 ipcMain.handle("upload:openFile", wrap(async (_e, s3Key) => { const url = await api.fileUrl(s3Key); await shell.openExternal(url); return true }))
-ipcMain.handle("upload:start", wrap(async (_e, payload) => {
-  const send = (p) => { if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send("upload:progress", { ...p, itemId: payload.itemId, kind: payload.kind }) }
-  try {
-    const out = await api.uploadItemFile({ ...payload, onProgress: send })
-    send({ bytes: out.size, size: out.size, done: true, name: out.name })
-    return out
-  } catch (err) {
-    const message = err?.response?.data?.message || err.message
-    send({ error: message })
-    throw new Error(message)
-  }
-}))
+// Compatibilité : envoi direct (sans file) — conservé pour le mode web.
+ipcMain.handle("upload:start", wrap(async (_e, payload) => getUploadQueue().enqueue(payload)))
 
 ipcMain.handle("config:setAutoLaunch", async (_e, enabled) => {
   store.set("autoLaunch", !!enabled)
