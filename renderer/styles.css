@@ -1,3 +1,8 @@
+/* ---------- connexion : espace détecté ---------- */
+.tenant-card { display: flex; align-items: center; gap: 8px; padding: 8px 10px; margin: 6px 0 10px; border: 1px solid var(--border, #2a2f3a); border-radius: 8px; }
+.tenant-badge { font-size: 11px; text-transform: uppercase; letter-spacing: .04em; opacity: .7; }
+.tenant-card.err { border-color: #f85149; }
+
 /* ---------- connexion : champ API avancé ---------- */
 details.advanced { margin: 4px 0 8px; }
 details.advanced summary { cursor: pointer; }

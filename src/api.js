@@ -123,7 +123,15 @@ async function resolveServerForTenant(input, hint = "") {
       if (!data.ok && !/API OK/i.test(String(data.message || ""))) { tried.push(`${base} : réponse inattendue`); continue }
       if (!data.tenancy) return { serverUrl: base, tenant: "", tenancy: false } // API dédiée mono-client
       const check = await checkTenant(base, t).catch(() => ({ found: false }))
-      if (check?.found) return { serverUrl: base, tenant: t, tenancy: true, check }
+      if (check?.found) {
+        // Nom du magasin (GET /store-info, public) pour l'afficher avant la connexion.
+        let name = null
+        try {
+          const si = await axios.get(`${base}/store-info`, { headers: { Accept: "application/json", "X-Tenant": t }, timeout: 6000 })
+          name = si.data?.name || null
+        } catch { name = null }
+        return { serverUrl: base, tenant: t, tenancy: true, check, name }
+      }
       tried.push(`${base} : espace « ${t} » inconnu`)
     } catch (err) {
       tried.push(`${base} : ${err?.message || "injoignable"}`)

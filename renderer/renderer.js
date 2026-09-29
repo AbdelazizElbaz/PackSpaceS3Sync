@@ -322,8 +322,38 @@ async function refreshConfig() {
     $("userLabel").textContent = ""
     if (c.serverUrl) $("serverUrl").value = c.serverUrl
     if (c.tenant) $("tenant").value = c.tenant
+    if (c.tenant) detectTenant()
   }
 }
+
+// Détection automatique de l'espace : dès que le champ est rempli (installeur,
+// lien printios-sync://, saisie), l'API est déduite et l'espace affiché AVANT
+// la connexion (carte « Espace »). Debounce 600 ms sur la saisie.
+let detectTimer = null
+let detectSeq = 0
+async function detectTenant() {
+  const card = $("tenantCard")
+  const tenantIn = $("tenant").value.trim()
+  const seq = ++detectSeq
+  if (!tenantIn) { card.classList.add("hidden"); return }
+  card.classList.remove("hidden", "err")
+  $("tenantName").textContent = tenantIn
+  $("tenantMeta").textContent = "détection…"
+  try {
+    const r = await window.agent.resolveTenant(tenantIn, $("serverUrl").value.trim())
+    if (seq !== detectSeq) return
+    if (!$("serverUrl").value.trim()) $("serverUrl").value = r.serverUrl
+    $("tenantName").textContent = r.name || r.tenant || tenantIn
+    $("tenantMeta").textContent = r.tenancy
+      ? `${r.tenant}${r.check?.type === "demo" ? " (démo)" : ""} · API ${r.serverUrl.replace(/^https?:\/\//, "").replace(/\/api$/, "")}`
+      : `API dédiée ${r.serverUrl.replace(/^https?:\/\//, "").replace(/\/api$/, "")}`
+  } catch (e) {
+    if (seq !== detectSeq) return
+    card.classList.add("err")
+    $("tenantMeta").textContent = e?.message || "espace introuvable"
+  }
+}
+$("tenant").addEventListener("input", () => { clearTimeout(detectTimer); detectTimer = setTimeout(detectTenant, 600) })
 
 $("pingBtn").addEventListener("click", async () => {
   const out = $("pingResult")
@@ -814,6 +844,7 @@ if (window.agent.onAuthPrefill) window.agent.onAuthPrefill((p) => {
   if (p?.serverUrl) $("serverUrl").value = p.serverUrl
   if (p?.tenant) $("tenant").value = p.tenant
   if (p?.logon) $("logon").value = p.logon
+  detectTenant()
   $("password").focus()
 })
 window.agent.onAuthLost(async () => {
