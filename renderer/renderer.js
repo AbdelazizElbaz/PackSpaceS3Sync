@@ -8,6 +8,21 @@ let lastState = { items: [], instances: [] }
 
 // ---------- helpers ----------
 
+// Message d'erreur lisible : Electron préfixe les erreurs IPC par
+// « Error invoking remote method 'auth:ping': Error: … » — retiré, et les
+// codes HTTP traduits (503 = serveur indisponible, etc.).
+function errMsg(e, fallback = "Erreur") {
+  let m = String(e?.message || e || fallback)
+  m = m.replace(/^Error invoking remote method '[^']*':\s*/i, "").replace(/^Error:\s*/i, "")
+  const code = /status code (\d{3})/i.exec(m)?.[1]
+  if (code) {
+    const known = { 401: "identifiants refusés", 403: "accès refusé", 404: "espace ou service introuvable", 429: "trop de tentatives, réessayez dans une minute", 500: "erreur du serveur", 502: "serveur injoignable (502)", 503: "service indisponible pour le moment (503)", 504: "serveur trop lent (504)" }
+    m = known[code] ? `${known[code]}` : m
+  }
+  if (/ENOTFOUND|EAI_AGAIN|ECONNREFUSED|ETIMEDOUT|Network Error/i.test(m)) m = "Connexion impossible : vérifiez le réseau et l'espace client."
+  return m
+}
+
 function fmtBytes(n) {
   if (!n) return "0 o"
   if (n < 1024) return `${n} o`
@@ -37,7 +52,7 @@ async function loadBrowse(prefix = currentPrefix) {
     renderCrumbs()
     renderBrowse(data)
   } catch (e) {
-    err.textContent = e?.message || "Impossible de lister le dossier."
+    err.textContent = errMsg(e, "Impossible de lister le dossier.")
     list.innerHTML = ""
   }
 }
@@ -140,7 +155,7 @@ function renderInstances(state) {
       try {
         await window.agent.updateInstance(Number(c.dataset.id), { deleteRemoved: c.checked })
       } catch (e) {
-        alert(e?.message || "Impossible de modifier l'option.")
+        alert(errMsg(e, "Impossible de modifier l'option."))
         c.checked = !c.checked
       }
     })
@@ -350,7 +365,7 @@ async function detectTenant() {
   } catch (e) {
     if (seq !== detectSeq) return
     card.classList.add("err")
-    $("tenantMeta").textContent = e?.message || "espace introuvable"
+    $("tenantMeta").textContent = errMsg(e, "espace introuvable")
   }
 }
 $("tenant").addEventListener("input", () => { clearTimeout(detectTimer); detectTimer = setTimeout(detectTenant, 600) })
@@ -394,7 +409,7 @@ $("pingBtn").addEventListener("click", async () => {
     out.textContent = text
   } catch (e) {
     out.className = "hint err"
-    out.textContent = e?.message || "Échec du test."
+    out.textContent = errMsg(e, "Échec du test.")
   }
 })
 
@@ -420,7 +435,7 @@ $("loginBtn").addEventListener("click", async () => {
     // encore connecté) : on la relance tout de suite.
     refreshUpdateBanner()
   } catch (e) {
-    err.textContent = e?.message || "Échec de connexion."
+    err.textContent = errMsg(e, "Échec de connexion.")
   } finally {
     btn.disabled = false
     btn.textContent = "Se connecter"
@@ -465,7 +480,7 @@ $("instSaveBtn").addEventListener("click", async () => {
     await window.agent.addInstance({ name, prefix, localDir, deleteRemoved: $("instDeleteRemoved").checked })
     $("instanceDialog").classList.add("hidden")
   } catch (e) {
-    $("instError").textContent = e?.message || "Impossible de créer l'instance."
+    $("instError").textContent = errMsg(e, "Impossible de créer l'instance.")
   }
 })
 
@@ -489,7 +504,7 @@ $("saveSettingsBtn").addEventListener("click", async () => {
     await window.agent.setSettings(partial)
     $("settingsDialog").classList.add("hidden")
   } catch (e) {
-    alert(e?.message || "Impossible d'enregistrer les réglages.")
+    alert(errMsg(e, "Impossible d'enregistrer les réglages."))
   }
 })
 $("autoLaunchToggle").addEventListener("change", (e) => window.agent.setAutoLaunch(e.target.checked))
@@ -545,7 +560,7 @@ async function refreshServiceStatus() {
   } catch (e) {
     badge.textContent = "erreur"
     badge.className = "badge err"
-    info.textContent = e?.message || "Impossible de lire l'état du service."
+    info.textContent = errMsg(e, "Impossible de lire l'état du service.")
   }
 }
 
@@ -575,7 +590,7 @@ $("serviceInstallBtn").addEventListener("click", async () => {
     await refreshConfig()
     await refreshServiceStatus()
   } catch (e) {
-    alert(e?.message || "Installation du service impossible.")
+    alert(errMsg(e, "Installation du service impossible."))
   } finally {
     btn.disabled = false
     btn.textContent = "Installer le service"
@@ -626,7 +641,7 @@ $("serviceUninstallBtn").addEventListener("click", async () => {
     await refreshConfig()
     await refreshServiceStatus()
   } catch (e) {
-    alert(e?.message || "Désinstallation du service impossible.")
+    alert(errMsg(e, "Désinstallation du service impossible."))
   } finally {
     btn.disabled = false
     btn.textContent = "Désinstaller le service"
@@ -685,7 +700,7 @@ $("updateApplyBtn").addEventListener("click", async () => {
     btn.classList.add("hidden")
     $("updateDismissBtn").classList.add("hidden")
   } catch (e) {
-    renderUpdateProgress({ active: false, phase: "error", message: e?.message || "Mise à jour impossible.", version: updateInfo?.version })
+    renderUpdateProgress({ active: false, phase: "error", message: errMsg(e, "Mise à jour impossible."), version: updateInfo?.version })
     btn.disabled = false
     btn.textContent = "Mettre à jour maintenant"
   }
@@ -804,7 +819,7 @@ async function loadUploadOrder() {
   } catch (e) {
     uploadOrder = null
     renderUploadOrder()
-    err.textContent = e?.message || "Commande introuvable."
+    err.textContent = errMsg(e, "Commande introuvable.")
   }
 }
 
@@ -821,7 +836,7 @@ async function startUpload(itemId, kind) {
     uploadOrder = fresh
     uploadStatus[key] = { ...uploadStatus[key], done: true }
   } catch (e) {
-    uploadStatus[key] = { ...uploadStatus[key], error: e?.message || "Échec de l'envoi." }
+    uploadStatus[key] = { ...uploadStatus[key], error: errMsg(e, "Échec de l'envoi.") }
   }
   renderUploadOrder()
 }
