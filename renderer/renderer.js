@@ -655,7 +655,7 @@ setInterval(refreshUpdateBanner, 2 * 60 * 60 * 1000)
 // Tant qu'aucune vérification n'a abouti (pas connecté au démarrage,
 // réseau…), on réessaie toutes les 5 min plutôt que d'attendre 2 h.
 setInterval(() => {
-  if (!updateInfo || updateInfo.reason === "not_logged_in" || updateInfo.reason === "error") refreshUpdateBanner()
+  if (!updateInfo || updateInfo.reason === "no_server" || updateInfo.reason === "not_logged_in" || updateInfo.reason === "error") refreshUpdateBanner()
 }, 5 * 60 * 1000)
 
 // Réglages → "Vérifier maintenant" + ligne d'état lisible (version installée,
@@ -674,6 +674,7 @@ function renderUpdateCheckStatus() {
   }
   const why = {
     not_logged_in: "connectez-vous pour vérifier les mises à jour",
+    no_server: "renseignez l'adresse de l'API pour vérifier les mises à jour",
     no_release: updateInfo.message || "aucune version publiée sur le serveur",
     up_to_date: `à jour (dernière publiée : v${updateInfo.version || "?"})`,
     no_asset_for_platform: `v${updateInfo.version} publiée mais sans installeur pour cette plateforme`,

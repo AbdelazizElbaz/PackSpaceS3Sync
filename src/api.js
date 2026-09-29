@@ -477,8 +477,23 @@ async function deleteInstance(id) {
 // téléchargement du B2B ; l'agent y a accès avec son propre jeton (rôle
 // admin/operator). { available, version, assets:[{os,arch,kind,name,size,url}] }
 async function fetchLatestRelease() {
-  const res = await client().get("/desktop/sync/releases")
-  return res.data
+  // Endpoint PUBLIC (GET /desktop/agent/release) : la mise à jour doit
+  // fonctionner même déconnecté (écran de connexion, jeton expiré) — seule
+  // l'adresse du serveur (et l'espace client) est nécessaire. Repli sur
+  // l'ancien endpoint authentifié pour une API2 antérieure.
+  const base = normalizeServerUrl(store.get("serverUrl"))
+  try {
+    const res = await axios.get(`${base}/desktop/agent/release`, {
+      // X-Agent-Id : limite de débit PAR POSTE côté API (et non par IP du magasin)
+      headers: { Accept: "application/json", "X-Agent-Id": machineId(), "X-Agent-Host": HOSTNAME, ...tenantHeaders() },
+      timeout: 15000,
+    })
+    return res.data
+  } catch (err) {
+    if (err?.response?.status !== 404 || !store.get("token")) throw err
+    const res = await client().get("/desktop/sync/releases")
+    return res.data
+  }
 }
 
 // Vérifie que le token stocké est encore valide (GET /me) — utilisé au
