@@ -467,6 +467,7 @@ ipcMain.handle("upload:retry", async (_e, id) => { getUploadQueue().retry(id); r
 ipcMain.handle("upload:remove", async (_e, id) => { getUploadQueue().remove(id); return true })
 ipcMain.handle("upload:clearDone", async () => { getUploadQueue().clearDone(); return true })
 ipcMain.handle("upload:getOrder", wrap(async (_e, orderId) => api.getOrder(orderId)))
+ipcMain.handle("upload:listOrders", wrap(async (_e, opts) => api.listUnshippedOrders(opts || {})))
 // Ouvre un fichier d'article (URL S3 présignée) dans le navigateur par défaut.
 ipcMain.handle("upload:openFile", wrap(async (_e, s3Key) => { const url = await api.fileUrl(s3Key); await shell.openExternal(url); return true }))
 // Compatibilité : envoi direct (sans file) — conservé pour le mode web.

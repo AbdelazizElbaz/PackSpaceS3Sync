@@ -195,6 +195,7 @@ class Engine {
     store.set("tenant", api.normalizeTenant(tenant))
     store.set("token", data.token)
     store.set("role", data.role || "")
+    store.set("userId", data.id || null)
     store.set("userLabel", `${data.first_name || ""} ${data.last_name || ""}`.trim() || data.logon)
     this.sync.registered = false
     if (this.canSync()) {
@@ -216,6 +217,10 @@ class Engine {
 
   fileUrl(s3Key) {
     return api.fileUrl(s3Key)
+  }
+
+  listUnshippedOrders(opts) {
+    return api.listUnshippedOrders(opts || {})
   }
 
   // Progression poussée via les listeners d'état (clé uploadProgress) pour
@@ -308,6 +313,7 @@ Engine.METHODS = [
   "resolveTenant",
   "getOrder",
   "fileUrl",
+  "listUnshippedOrders",
   "uploadItemFile",
   "logout",
   "browse",

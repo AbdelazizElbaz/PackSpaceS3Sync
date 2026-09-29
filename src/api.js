@@ -318,6 +318,28 @@ async function getOrder(orderId) {
   }
 }
 
+// Commandes PAS ENCORE EXPÉDIÉES de l'utilisateur (mode utilisateur) —
+// GET /orders/unshipped, même endpoint que l'onglet « À expédier » du B2B.
+// Vendeur / revendeur : limité à son revendeur (reseller_user_id, comme le
+// front) ; admin / opérateur : toutes. `search` = n° commande / client.
+async function listUnshippedOrders({ search = "", limit = 100 } = {}) {
+  const role = store.get("role") || ""
+  const params = { search: search || undefined }
+  if (["vendeur", "reseller"].includes(role) && store.get("userId")) params.reseller_user_id = store.get("userId")
+  const res = await client().get("/orders/unshipped", { params })
+  const list = Array.isArray(res.data) ? res.data : (res.data?.data || [])
+  return list.slice(0, limit).map((o) => ({
+    id: o.id,
+    stat: o.stat,
+    date: o.date || o.created_at,
+    reseller: `${o.reseller?.user?.first_name || ""} ${o.reseller?.user?.last_name || ""}`.trim(),
+    customer: o.shippingaddress?.customer_name || o.client?.full_name || o.customer_name || "",
+    items_count: Array.isArray(o.items) ? o.items.length : (o.items_count ?? null),
+    total: o.total_order,
+    has_shipping: !!o.has_shipping,
+  }))
+}
+
 // URL présignée (15 min) pour OUVRIR un fichier d'article dans le navigateur
 // (POST /s3file/presignDownload, même endpoint que la synchro).
 async function fileUrl(s3Key) {
@@ -584,6 +606,7 @@ module.exports = {
   ping,
   login,
   getOrder,
+  listUnshippedOrders,
   fileUrl,
   uploadItemFile,
   declareLocalCopy,

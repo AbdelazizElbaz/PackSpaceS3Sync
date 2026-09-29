@@ -331,6 +331,8 @@ async function refreshConfig() {
     $("syncHead").classList.toggle("hidden", !canSync)
     $("syncBody").classList.toggle("hidden", !canSync)
     $("uploadPanel").classList.toggle("hidden", !canUpload)
+    $("ordersPane").classList.toggle("hidden", !canUpload)
+    if (canUpload) loadOrdersList()
     $("autoLaunchToggle").checked = !!c.autoLaunch
     $("autoUpdateToggle").checked = Number(c.autoUpdate) === 1
     for (const k of SETTINGS) $(k).value = c[k]
@@ -880,6 +882,33 @@ async function startUpload(itemId, kind) {
     $("uploadError").textContent = errMsg(e, "Impossible d'ajouter l'envoi.")
   }
 }
+
+// Liste des commandes PAS ENCORE EXPÉDIÉES (colonne gauche, mode utilisateur) :
+// un clic charge la commande dans le panneau de droite. Rafraîchie toutes les 60 s.
+let ordersSearchTimer = null
+async function loadOrdersList() {
+  const box = $("ordersList")
+  const err = $("ordersError")
+  err.textContent = ""
+  try {
+    const list = await window.agent.listOrders({ search: $("ordersSearch").value.trim() })
+    if (!list.length) { box.innerHTML = `<p class="empty">Aucune commande à expédier.</p>`; return }
+    box.innerHTML = list.map((o) => `<div class="browse-row order-row ${uploadOrder && Number(uploadOrder.id) === Number(o.id) ? "active" : ""}" data-order="${o.id}">
+        <div class="order-row-main"><strong>#${o.id}</strong> ${o.customer ? `· ${o.customer}` : ""}${o.reseller ? ` <span class="hint">· ${o.reseller}</span>` : ""}</div>
+        <div class="hint">${o.stat || ""}${o.date ? ` · ${String(o.date).slice(0, 10)}` : ""}${o.items_count != null ? ` · ${o.items_count} article(s)` : ""}${o.has_shipping ? " · colis créé" : ""}</div>
+      </div>`).join("")
+    box.querySelectorAll("[data-order]").forEach((el) => el.addEventListener("click", () => {
+      $("uploadOrderId").value = el.dataset.order
+      loadUploadOrder()
+      box.querySelectorAll(".order-row").forEach((r) => r.classList.toggle("active", r === el))
+    }))
+  } catch (e) {
+    err.textContent = errMsg(e, "Impossible de charger les commandes.")
+  }
+}
+$("refreshOrdersBtn").addEventListener("click", loadOrdersList)
+$("ordersSearch").addEventListener("input", () => { clearTimeout(ordersSearchTimer); ordersSearchTimer = setTimeout(loadOrdersList, 400) })
+setInterval(() => { if (!$("ordersPane").classList.contains("hidden")) loadOrdersList() }, 60 * 1000)
 
 $("uploadLoadBtn").addEventListener("click", loadUploadOrder)
 $("uploadOrderId").addEventListener("keydown", (e) => { if (e.key === "Enter") loadUploadOrder() })

@@ -55,6 +55,19 @@
 
   <!-- ---------- Application ---------- -->
   <section id="mainView" class="view main hidden">
+    <!-- Colonne gauche (mode utilisateur) : commandes pas encore expédiées -->
+    <aside id="ordersPane" class="pane explorer hidden">
+      <div class="pane-head">
+        <strong>Commandes à expédier</strong>
+        <button id="refreshOrdersBtn" class="icon" title="Actualiser">↻</button>
+      </div>
+      <div class="dir-row" style="padding:6px 10px">
+        <input id="ordersSearch" type="text" placeholder="N° ou client…" />
+      </div>
+      <div id="ordersError" class="error"></div>
+      <div id="ordersList" class="browse-list"><p class="empty">Chargement…</p></div>
+    </aside>
+
     <!-- Colonne gauche : explorateur S3 -->
     <aside id="explorerPane" class="pane explorer">
       <div class="pane-head">

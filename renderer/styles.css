@@ -1,3 +1,8 @@
+/* ---------- liste des commandes (mode utilisateur) ---------- */
+.order-row { display: block; padding: 8px 10px; cursor: pointer; border-bottom: 1px solid var(--border, #2a2f3a); }
+.order-row:hover, .order-row.active { background: color-mix(in srgb, var(--accent, #2f6394) 18%, transparent); }
+.order-row-main { font-size: 13px; }
+
 /* ---------- file d'envoi ---------- */
 .upload-queue { display: grid; gap: 4px; max-height: 220px; overflow: auto; }
 .queue-row { display: grid; grid-template-columns: 1fr auto auto; gap: 6px 10px; align-items: center; padding: 6px 10px; border: 1px solid var(--border, #2a2f3a); border-radius: 6px; font-size: 12px; }

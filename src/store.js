@@ -73,6 +73,7 @@ const store = new Conf({
     // Rôle du compte connecté : sync_agent/admin/operator → synchro S3 ;
     // vendeur/admin/operator → envoi de fichiers (voir api.js).
     role: "",
+    userId: null,
     // Partage de fichiers entre agents sur le LAN (voir peerServer.js) :
     // jeton pair remis par l'API à l'enregistrement, copies locales déclarées.
     peerToken: "",

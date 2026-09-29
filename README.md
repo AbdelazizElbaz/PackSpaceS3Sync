@@ -59,8 +59,13 @@ Selon le compte connecté (voir `src/api.js`) :
 | `sync_agent` (compte de l'agent) | oui | non |
 | `admin`, `operator`, `vendeur` | **non** (mode utilisateur, jeton de session 12 j) | oui |
 
-En mode utilisateur, la synchronisation est entièrement masquée : on charge
-une commande par son numéro, chaque article affiche ses fichiers de
+En mode utilisateur, la synchronisation est entièrement masquée : la
+colonne de gauche liste les **commandes pas encore expédiées** de
+l'utilisateur (`GET /orders/unshipped`, même endpoint que l'onglet
+« À expédier » ; vendeur / revendeur : son revendeur seulement via
+`reseller_user_id`, admin / opérateur : toutes ; recherche n° / client,
+rafraîchie toutes les 60 s), un clic charge la commande ; on peut aussi la
+charger par son numéro, chaque article affiche ses fichiers de
 conception et de montage (clic = ouverture dans le navigateur via une URL
 présignée, `POST /s3file/presignDownload`) et propose leur envoi.
 
