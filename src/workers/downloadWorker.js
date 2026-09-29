@@ -198,10 +198,95 @@ async function downloadChunked(job, url, totalSize) {
   fs.rmSync(chunksDir, { recursive: true, force: true })
 }
 
+// ---------- copies locales (LAN) ----------
+// md5 d'un fichier sur disque (vérification après copie).
+function md5File(p) {
+  return new Promise((resolve, reject) => {
+    const h = require("crypto").createHash("md5")
+    fs.createReadStream(p).on("data", (d) => h.update(d)).on("end", () => resolve(h.digest("hex"))).on("error", reject)
+  })
+}
+
+// Copie disque à disque (même PC) vers <dest>.part puis rename.
+async function copyFromSelf(job, copy) {
+  const st = fs.statSync(copy.local_path)
+  if (copy.size && st.size !== copy.size) throw new Error("taille différente")
+  const tmp = `${job.destPath}.part`
+  await fs.promises.copyFile(copy.local_path, tmp)
+  if (copy.checksum && (await md5File(tmp)) !== copy.checksum) { fs.rmSync(tmp, { force: true }); throw new Error("empreinte différente") }
+  fs.renameSync(tmp, job.destPath)
+  post({ type: "progress", id: job.id, received: st.size, total: st.size, speed: 0 })
+  return st.size
+}
+
+// Téléchargement depuis un autre agent du magasin (serveur pair, port 47832).
+async function copyFromPeer(job, copy, key) {
+  const url = `http://${copy.lan_host}:${copy.lan_port}/peer/file?key=${encodeURIComponent(key)}`
+  const res = await axios.get(url, {
+    headers: { Authorization: `Bearer ${copy.peer_token}` },
+    responseType: "stream",
+    timeout: 8000, // délai de CONNEXION/entêtes ; le flux n'est pas limité
+  })
+  const total = Number(res.headers["content-length"] || copy.size || 0)
+  const tmp = `${job.destPath}.part`
+  const writer = fs.createWriteStream(tmp)
+  current.streams.add(res.data)
+  res.data.__writer = writer
+  let received = 0
+  const report = makeProgressReporter(job.id, total, () => received)
+  await new Promise((resolve, reject) => {
+    res.data.on("data", (d) => { received += d.length; report(d.length) })
+    res.data.on("error", reject)
+    writer.on("error", reject)
+    writer.on("finish", resolve)
+    res.data.pipe(writer)
+  })
+  current.streams.delete(res.data)
+  if (current.cancelled) throw Object.assign(new Error("Annulé"), { cancelled: true })
+  report(0, true)
+  const st = fs.statSync(tmp)
+  if ((total && st.size !== total) || (copy.size && st.size !== copy.size)) { fs.rmSync(tmp, { force: true }); throw new Error("taille différente") }
+  const expected = copy.checksum || res.headers["x-checksum"]
+  if (expected && (await md5File(tmp)) !== expected) { fs.rmSync(tmp, { force: true }); throw new Error("empreinte différente") }
+  fs.renameSync(tmp, job.destPath)
+  return st.size
+}
+
+// Essaie les copies locales (soi-même, puis pairs en ligne) ; true si obtenu.
+async function tryLocalCopies(job) {
+  const key = job.s3Key
+  for (const copy of job.localCopies || []) {
+    if (current.cancelled) return false
+    try {
+      if (copy.self && copy.local_path) {
+        const n = await copyFromSelf(job, copy)
+        post({ type: "info", id: job.id, message: `Copié localement (${n} octets) depuis ${copy.local_path}` })
+        return true
+      }
+      if (!copy.self && copy.online && copy.lan_host && copy.lan_port && copy.peer_token) {
+        const n = await copyFromPeer(job, copy, key)
+        post({ type: "info", id: job.id, message: `Récupéré sur le LAN (${n} octets) depuis ${copy.hostname || copy.lan_host}` })
+        return true
+      }
+    } catch (err) {
+      if (err?.cancelled) throw err
+      post({ type: "info", id: job.id, message: `Copie locale ignorée (${copy.hostname || copy.lan_host || "ce poste"} : ${err.message}) → S3` })
+    }
+  }
+  return false
+}
+
 async function run(job) {
   current = { id: job.id, cancelled: false, streams: new Set() }
   try {
     fs.mkdirSync(path.dirname(job.destPath), { recursive: true })
+
+    // 0) Copie locale / pair LAN avant S3 (voir peerServer.js)
+    if ((job.localCopies || []).length > 0 && await tryLocalCopies(job)) {
+      post({ type: "done", id: job.id, source: "lan" })
+      return
+    }
+
     const { size, supportsRange } = await getRemoteSize(job.url)
 
     // Déjà complet sur disque (ex : ack API2 échoué au tour précédent, ou

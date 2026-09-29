@@ -11,6 +11,12 @@ contextBridge.exposeInMainWorld("agent", {
   login: (payload) => ipcRenderer.invoke("auth:login", payload),
   logout: () => ipcRenderer.invoke("auth:logout"),
 
+  // Envoi de fichiers (conception / montage) sur une commande
+  pickUploadFile: () => ipcRenderer.invoke("upload:pickFile"),
+  getOrder: (orderId) => ipcRenderer.invoke("upload:getOrder", orderId),
+  uploadItemFile: (payload) => ipcRenderer.invoke("upload:start", payload),
+  onUploadProgress: (cb) => ipcRenderer.on("upload:progress", (_e, p) => cb(p)),
+
   // Explorateur S3 (PrintProd)
   browse: (prefix) => ipcRenderer.invoke("s3:browse", prefix),
 

@@ -302,7 +302,15 @@ async function refreshConfig() {
   if (c.isLoggedIn) {
     $("loginView").classList.add("hidden")
     $("mainView").classList.remove("hidden")
-    $("userLabel").textContent = `${c.userLabel || ""} · ${c.agentLabel || c.hostname || ""}`
+    $("userLabel").textContent = `${c.userLabel || ""}${c.role ? ` (${c.role})` : ""} · ${c.agentLabel || c.hostname || ""}`
+    // Selon le rôle (voir api.js) : synchro S3 (sync_agent/admin/opérateur)
+    // et/ou envoi de fichiers sur les commandes (vendeur/admin/opérateur).
+    const canSync = c.canSync !== false
+    const canUpload = !!c.canUpload
+    $("explorerPane").classList.toggle("hidden", !canSync)
+    $("syncHead").classList.toggle("hidden", !canSync)
+    $("syncBody").classList.toggle("hidden", !canSync)
+    $("uploadPanel").classList.toggle("hidden", !canUpload)
     $("autoLaunchToggle").checked = !!c.autoLaunch
     $("autoUpdateToggle").checked = Number(c.autoUpdate) === 1
     for (const k of SETTINGS) $(k).value = c[k]
@@ -705,6 +713,85 @@ $("scanNowBtn").addEventListener("click", () => window.agent.scanNow())
 $("pauseBtn").addEventListener("click", async () => {
   if (lastState.paused) await window.agent.resume()
   else await window.agent.pause()
+})
+
+// ---------- envoi de fichiers (conception / montage) ----------
+let uploadOrder = null
+const uploadStatus = {} // `${itemId}:${kind}` → { bytes, size, done, error, name }
+
+function renderUploadOrder() {
+  const box = $("uploadOrder")
+  if (!uploadOrder) { box.innerHTML = "" ; return }
+  const o = uploadOrder
+  const meta = `<div class="order-meta">Commande <strong>#${o.id}</strong> · ${o.stat || ""}${o.reseller ? ` · ${o.reseller}` : ""}${o.date ? ` · ${String(o.date).slice(0, 10)}` : ""}</div>`
+  const items = (o.items || []).map((it) => {
+    const st = (kind) => uploadStatus[`${it.id}:${kind}`]
+    const bar = (kind) => {
+      const s = st(kind)
+      if (!s) return ""
+      if (s.error) return `<div class="item-status err">${kind === "design" ? "Conception" : "Montage"} : ${s.error}</div>`
+      if (s.done) return `<div class="item-status ok">${kind === "design" ? "Conception" : "Montage"} envoyé : ${s.name || ""}</div>`
+      const pct = s.size ? Math.round((s.bytes / s.size) * 100) : 0
+      return `<progress max="100" value="${pct}"></progress><div class="item-status">${kind === "design" ? "Conception" : "Montage"} : ${pct}% (${fmtBytes(s.bytes)} / ${fmtBytes(s.size)})</div>`
+    }
+    return `<div class="upload-item" data-item="${it.id}">
+      <div>
+        <div class="item-name">${it.name}${it.quantity ? ` ×${it.quantity}` : ""}</div>
+        <div class="item-files">
+          <span>Conception : ${it.design_file || "—"}</span>
+          <span>Montage / impression : ${it.print_file || "—"}</span>
+        </div>
+      </div>
+      <button class="small" data-upload="design" data-item="${it.id}">Fichier de conception…</button>
+      <button class="small primary" data-upload="print" data-item="${it.id}">Fichier de montage…</button>
+      ${bar("design")}${bar("print")}
+    </div>`
+  }).join("")
+  box.innerHTML = meta + (items || `<p class="empty">Aucun article sur cette commande.</p>`)
+  box.querySelectorAll("button[data-upload]").forEach((b) => b.addEventListener("click", () => startUpload(Number(b.dataset.item), b.dataset.upload)))
+}
+
+async function loadUploadOrder() {
+  const err = $("uploadError")
+  err.textContent = ""
+  const id = $("uploadOrderId").value.trim().replace(/^#|^ORD-/i, "")
+  if (!id) return
+  try {
+    uploadOrder = await window.agent.getOrder(id)
+    Object.keys(uploadStatus).forEach((k) => delete uploadStatus[k])
+    renderUploadOrder()
+  } catch (e) {
+    uploadOrder = null
+    renderUploadOrder()
+    err.textContent = e?.message || "Commande introuvable."
+  }
+}
+
+async function startUpload(itemId, kind) {
+  const file = await window.agent.pickUploadFile()
+  if (!file || !uploadOrder) return
+  const key = `${itemId}:${kind}`
+  uploadStatus[key] = { bytes: 0, size: file.size, name: file.name }
+  renderUploadOrder()
+  try {
+    await window.agent.uploadItemFile({ orderId: uploadOrder.id, itemId, filePath: file.path, kind })
+    // Recharge la commande pour afficher le fichier rattaché.
+    const fresh = await window.agent.getOrder(uploadOrder.id)
+    uploadOrder = fresh
+    uploadStatus[key] = { ...uploadStatus[key], done: true }
+  } catch (e) {
+    uploadStatus[key] = { ...uploadStatus[key], error: e?.message || "Échec de l'envoi." }
+  }
+  renderUploadOrder()
+}
+
+$("uploadLoadBtn").addEventListener("click", loadUploadOrder)
+$("uploadOrderId").addEventListener("keydown", (e) => { if (e.key === "Enter") loadUploadOrder() })
+window.agent.onUploadProgress((p) => {
+  const key = `${p.itemId}:${p.kind}`
+  if (!uploadStatus[key]) return
+  uploadStatus[key] = { ...uploadStatus[key], ...p }
+  renderUploadOrder()
 })
 
 // ---------- init ----------

@@ -50,6 +50,56 @@ Le tooltip du tray résume l'activité (nb de fichiers, débit cumulé).
 Côté backend : `API2/app/Http/Controllers/DesktopFilesController.php`
 (`browse`, `listObjects`, `agentToken`), `S3FileController::presignDownload`.
 
+## Envoi de fichiers sur une commande (conception / montage)
+
+Selon le compte connecté (voir `src/api.js`) :
+
+| Rôle | Synchronisation S3 (téléchargement des fichiers à imprimer) | Envoi de fichiers sur une commande |
+|---|---|---|
+| `sync_agent` (compte de l'agent) | oui | non |
+| `admin`, `operator` | oui | oui |
+| `vendeur` | non (jeton de session 12 j, pas de jeton agent) | oui |
+
+Le panneau « Envoyer des fichiers sur une commande » (haut de la colonne
+droite) : saisir le n° de commande → **Charger** (`GET /orders/{id}`, scopé
+côté API2 : un vendeur ne voit que ses commandes) → pour chaque article,
+**Fichier de conception…** (`POST orders/{o}/items/{i}/design-file`) ou
+**Fichier de montage…** (`POST …/items/{i}/file`). Le fichier part en
+multipart présigné vers S3 (`s3file/initMultipart` / `signPart` /
+`completeMultipart`, 4 parties en parallèle, 3 tentatives par partie —
+même flux que le front web), depuis le processus principal (droits de
+l'utilisateur sur ses fichiers, même en mode service), avec barre de
+progression par article. Non disponible en mode web/conteneur.
+
+## Partage de fichiers entre agents (LAN) — éviter le re-téléchargement
+
+Un fichier envoyé depuis un poste du magasin (panneau « Envoyer des
+fichiers ») reste sur ce poste. L'agent le déclare à API2
+(`POST /desktop/local-copies` : clé S3 + nom de base, chemin local, taille,
+md5) et le mémorise (`localCopies` dans la config). Quand la commande part
+en impression, `CopyOrderFilesToPrintJob` reporte la copie locale sur la clé
+`PrintProd/…`. L'agent qui synchronise ce dossier interroge alors
+`GET /desktop/local-copies?key=…` avant de télécharger :
+
+- **même poste** → copie disque à disque (`fs.copyFile`), vérification
+  taille + md5 ;
+- **autre poste en ligne** → `GET http://<lan_host>:<lan_port>/peer/file?key=…`
+  avec `Authorization: Bearer <peer_token>` sur le **serveur pair** de
+  l'agent (`src/peerServer.js`, écoute 0.0.0.0:**443** par défaut, repli
+  automatique sur 47832 si 443 est occupé/interdit — le port réel est
+  publié à l'API ; réglable via `peerPort` dans la config ; ne sert que les
+  fichiers déclarés, jamais un chemin arbitraire ; le `peer_token` est
+  généré par API2 à l'enregistrement et n'est remis qu'aux agents
+  authentifiés du même tenant) ; vérification taille + md5 (`X-Checksum`) ;
+- sinon, ou en cas d'échec / empreinte différente → téléchargement S3
+  habituel. L'événement « file_done » indique la source (LAN / local).
+
+`lan_host`/`lan_port` sont envoyés à l'enregistrement et à chaque heartbeat
+(première IPv4 non interne). Pare-feu : autoriser le port TCP 443 (ou
+47832 en repli) en entrée sur les postes qui envoient des fichiers. Le
+transport est HTTP en clair sur le LAN (jeton pair + md5) — pas de TLS,
+sinon il faudrait un certificat par poste.
+
 ## Multi-client PrintIOS (API2 multi-tenant)
 
 Sur PrintIOS, **une seule API** (`https://api.printios.ma`) sert tous les

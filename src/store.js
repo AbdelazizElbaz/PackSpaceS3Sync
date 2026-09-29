@@ -70,6 +70,14 @@ const store = new Conf({
     // "om.packspace.ma"). Vide = API mono-client (Packspace historique).
     tenant: "",
     token: "",
+    // Rôle du compte connecté : sync_agent/admin/operator → synchro S3 ;
+    // vendeur/admin/operator → envoi de fichiers (voir api.js).
+    role: "",
+    // Partage de fichiers entre agents sur le LAN (voir peerServer.js) :
+    // jeton pair remis par l'API à l'enregistrement, copies locales déclarées.
+    peerToken: "",
+    peerPort: 443, // serveur pair LAN (repli automatique sur 47832 si occupé)
+    localCopies: {},
     userLabel: "",
     downloadDir: "",
     pollIntervalMs: 5000,

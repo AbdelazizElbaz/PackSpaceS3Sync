@@ -48,7 +48,7 @@
   <!-- ---------- Application ---------- -->
   <section id="mainView" class="view main hidden">
     <!-- Colonne gauche : explorateur S3 -->
-    <aside class="pane explorer">
+    <aside id="explorerPane" class="pane explorer">
       <div class="pane-head">
         <strong>Dossier d'impression (S3)</strong>
         <button id="refreshBrowseBtn" class="icon" title="Actualiser">↻</button>
@@ -61,9 +61,22 @@
       </div>
     </aside>
 
-    <!-- Colonne droite : instances + fichiers -->
+    <!-- Colonne droite : envoi de fichiers + instances + fichiers -->
     <main class="pane content">
-      <div class="pane-head">
+      <!-- Envoi de fichiers de conception / montage sur une commande —
+           vendeur, opérateur, admin (voir api.js UPLOAD_ROLES). -->
+      <section id="uploadPanel" class="upload-panel hidden">
+        <div class="pane-head">
+          <strong>Envoyer des fichiers sur une commande</strong>
+          <span class="head-actions">
+            <input id="uploadOrderId" type="text" placeholder="N° de commande (ex. 203)" />
+            <button id="uploadLoadBtn" class="small primary">Charger</button>
+          </span>
+        </div>
+        <p id="uploadError" class="error"></p>
+        <div id="uploadOrder" class="upload-order"></div>
+      </section>
+      <div id="syncHead" class="pane-head">
         <strong>Instances de synchronisation</strong>
         <span class="head-actions">
           <button id="scanNowBtn" class="small">Vérifier maintenant</button>
@@ -73,6 +86,7 @@
         </span>
       </div>
 
+      <div id="syncBody">
       <div id="instances" class="instances"><p class="empty">Aucune instance. Choisissez un dossier à gauche puis « Synchroniser ce dossier… ».</p></div>
 
       <div class="pane-head">
@@ -80,6 +94,7 @@
         <span id="summary" class="summary"></span>
       </div>
       <div id="list" class="list"><p class="empty">Aucun fichier en cours.</p></div>
+      </div>
     </main>
   </section>
 

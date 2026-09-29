@@ -250,10 +250,29 @@ class ServiceBackend {
   }
 }
 
+// Serveur pair LAN (fichiers envoyés depuis ce poste, voir peerServer.js).
+// Démarré dans le processus principal ; en mode service, le service l'a
+// déjà (le port est alors occupé : simple avertissement).
+let peerServer = null
+function startPeerServer() {
+  if (peerServer) return
+  try {
+    peerServer = require("./peerServer").startPeerServer({
+      token: () => store.get("peerToken"),
+      version: api.APP_VERSION,
+      hostname: api.HOSTNAME,
+      log: (level, message) => { if (level !== "info") console.warn(message) },
+    })
+  } catch (err) {
+    console.warn("Serveur pair non démarré :", err.message)
+  }
+}
+
 function startBackend() {
   if (backend) backend.stop().catch(() => {})
   backend = store.get("mode") === "service" ? new ServiceBackend() : new LocalBackend()
   backend.start()
+  startPeerServer()
 }
 
 app.whenReady().then(() => {
@@ -348,6 +367,37 @@ ipcMain.handle("config:chooseDir", async () => {
   if (res.canceled || !res.filePaths[0]) return null
   return res.filePaths[0]
 })
+
+// ---------- envoi de fichiers (conception / montage) sur une commande ----------
+// Exécuté dans le processus principal (pas dans le service) : le fichier est
+// choisi par l'utilisateur dans SA session, avec ses droits d'accès ; la
+// progression est poussée à la fenêtre (upload:progress).
+ipcMain.handle("upload:pickFile", async () => {
+  const res = await dialog.showOpenDialog(mainWindow, {
+    properties: ["openFile"],
+    filters: [
+      { name: "Fichiers d'impression / conception", extensions: ["pdf", "ai", "eps", "psd", "tif", "tiff", "png", "jpg", "jpeg", "svg", "cdr", "zip"] },
+      { name: "Tous les fichiers", extensions: ["*"] },
+    ],
+  })
+  if (res.canceled || !res.filePaths[0]) return null
+  const fs = require("fs")
+  const p = res.filePaths[0]
+  return { path: p, name: require("path").basename(p), size: fs.statSync(p).size }
+})
+ipcMain.handle("upload:getOrder", wrap(async (_e, orderId) => api.getOrder(orderId)))
+ipcMain.handle("upload:start", wrap(async (_e, payload) => {
+  const send = (p) => { if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send("upload:progress", { ...p, itemId: payload.itemId, kind: payload.kind }) }
+  try {
+    const out = await api.uploadItemFile({ ...payload, onProgress: send })
+    send({ bytes: out.size, size: out.size, done: true, name: out.name })
+    return out
+  } catch (err) {
+    const message = err?.response?.data?.message || err.message
+    send({ error: message })
+    throw new Error(message)
+  }
+}))
 
 ipcMain.handle("config:setAutoLaunch", async (_e, enabled) => {
   store.set("autoLaunch", !!enabled)
