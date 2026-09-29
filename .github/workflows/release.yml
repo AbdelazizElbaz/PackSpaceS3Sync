@@ -33,6 +33,11 @@
 
 name: Release
 
+# Nom de l'exécution dans l'onglet Actions : « Release v2.0.7 » (tag ou numéro
+# saisi) ; en incrément automatique le numéro n'est connu qu'au build → « Release
+# (auto) », puis le numéro réel est écrit dans le résumé de l'exécution.
+run-name: "Release ${{ github.event_name == 'push' && github.ref_name || (inputs.version != '' && format('v{0}', inputs.version) || '(auto)') }} — ${{ github.actor }}"
+
 on:
   push:
     tags: ["v*"]
@@ -95,6 +100,7 @@ jobs:
           fi
           echo "version=$V" >> "$GITHUB_OUTPUT"
           npm version "$V" --no-git-tag-version --allow-same-version
+          echo "## Release v$V (${{ matrix.os }})" >> "$GITHUB_STEP_SUMMARY"
 
       - run: npm ci
 
@@ -202,6 +208,7 @@ jobs:
           if git ls-remote --tags origin "refs/tags/v$V" | grep -q .; then echo "tag v$V déjà présent"; exit 0; fi
           git tag "v$V" "${GITHUB_SHA}"
           git push origin "v$V"
+          echo "## Version publiée : v$V (tag posé)" >> "$GITHUB_STEP_SUMMARY"
 
   # Indépendant de S3/Prod : utilise GITHUB_TOKEN (permission packages:write).
   # Multi-arch : amd64 (la plupart des NAS Synology) + arm64 (modèles ARM).
