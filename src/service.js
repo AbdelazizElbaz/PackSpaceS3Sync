@@ -101,6 +101,8 @@ async function main() {
     log,
   })
   engine.start()
+  // Serveur pair LAN : sert aux autres agents les fichiers envoyés depuis ce poste.
+  require("./peerServer").startPeerServer({ token: () => store.get("peerToken"), version: api.APP_VERSION, hostname: api.HOSTNAME, log })
 
   let stopping = false
   const shutdown = async (signal) => {

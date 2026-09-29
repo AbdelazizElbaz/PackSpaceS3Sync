@@ -86,10 +86,19 @@
       return d && d.trim() ? d.trim() : null
     },
     setAutoLaunch: async () => false,
-    ping: (serverUrl) => rpc("ping", [serverUrl]),
+    ping: (serverUrl, tenant) => rpc("ping", [serverUrl, tenant]),
+    resolveTenant: (tenant, hint) => rpc("resolveTenant", [tenant, hint]),
     login: (payload) => rpc("login", [payload]),
     logout: () => rpc("logout"),
     browse: (prefix) => rpc("browse", [prefix || ""]),
+    // Envoi de fichiers : pas de dialogue natif en mode web (conteneur) —
+    // fonction réservée à l'application de bureau.
+    pickUploadFile: async () => { window.alert("L'envoi de fichiers n'est disponible que dans l'application de bureau."); return null },
+    getOrder: (orderId) => rpc("getOrder", [orderId]),
+    openItemFile: async (s3Key) => { const url = await rpc("fileUrl", [s3Key]); window.open(url, "_blank"); return true },
+    uploadItemFile: (payload) => rpc("uploadItemFile", [payload]),
+    onUploadProgress: () => {},
+    onAuthPrefill: () => {},
     addInstance: (payload) => rpc("addInstance", [payload]),
     updateInstance: (id, patch) => rpc("updateInstance", [id, patch]),
     removeInstance: (id) => rpc("removeInstance", [id]),

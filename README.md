@@ -1,4 +1,4 @@
-# PackSpace S3 Sync
+# PrintIOS Sync (PackSpace S3 Sync)
 
 Agent desktop (Windows / macOS / Linux, Electron) qui tourne en arrière-plan
 (icône dans la zone de notification) et synchronise **automatiquement et en
@@ -49,6 +49,114 @@ Le tooltip du tray résume l'activité (nb de fichiers, débit cumulé).
 
 Côté backend : `API2/app/Http/Controllers/DesktopFilesController.php`
 (`browse`, `listObjects`, `agentToken`), `S3FileController::presignDownload`.
+
+## Envoi de fichiers sur une commande (conception / montage)
+
+Selon le compte connecté (voir `src/api.js`) :
+
+| Rôle | Synchronisation S3 (téléchargement des fichiers à imprimer) | Mode utilisateur : commande par n°, consulter / envoyer les fichiers des articles |
+|---|---|---|
+| `sync_agent` (compte de l'agent) | oui | non |
+| `admin`, `operator`, `vendeur` | **non** (mode utilisateur, jeton de session 12 j) | oui |
+
+En mode utilisateur, la synchronisation est entièrement masquée : on charge
+une commande par son numéro, chaque article affiche ses fichiers de
+conception et de montage (clic = ouverture dans le navigateur via une URL
+présignée, `POST /s3file/presignDownload`) et propose leur envoi.
+
+Le panneau « Envoyer des fichiers sur une commande » (haut de la colonne
+droite) : saisir le n° de commande → **Charger** (`GET /orders/{id}`, scopé
+côté API2 : un vendeur ne voit que ses commandes) → pour chaque article,
+**Fichier de conception…** (`POST orders/{o}/items/{i}/design-file`) ou
+**Fichier de montage…** (`POST …/items/{i}/file`). Le fichier part en
+multipart présigné vers S3 (`s3file/initMultipart` / `signPart` /
+`completeMultipart`, 4 parties en parallèle, 3 tentatives par partie —
+même flux que le front web), depuis le processus principal (droits de
+l'utilisateur sur ses fichiers, même en mode service), avec barre de
+progression par article. Non disponible en mode web/conteneur.
+
+## Partage de fichiers entre agents (LAN) — éviter le re-téléchargement
+
+Un fichier envoyé depuis un poste du magasin (panneau « Envoyer des
+fichiers ») reste sur ce poste. L'agent le déclare à API2
+(`POST /desktop/local-copies` : clé S3 + nom de base, chemin local, taille,
+md5) et le mémorise (`localCopies` dans la config). Quand la commande part
+en impression, `CopyOrderFilesToPrintJob` reporte la copie locale sur la clé
+`PrintProd/…`. L'agent qui synchronise ce dossier interroge alors
+`GET /desktop/local-copies?key=…` avant de télécharger :
+
+- **même poste** → copie disque à disque (`fs.copyFile`), vérification
+  taille + md5 ;
+- **autre poste en ligne** → `GET http://<lan_host>:<lan_port>/peer/file?key=…`
+  avec `Authorization: Bearer <peer_token>` sur le **serveur pair** de
+  l'agent (`src/peerServer.js`, écoute 0.0.0.0:**443** par défaut, repli
+  automatique sur 47832 si 443 est occupé/interdit — le port réel est
+  publié à l'API ; réglable via `peerPort` dans la config ; ne sert que les
+  fichiers déclarés, jamais un chemin arbitraire ; le `peer_token` est
+  généré par API2 à l'enregistrement et n'est remis qu'aux agents
+  authentifiés du même tenant) ; vérification taille + md5 (`X-Checksum`) ;
+- sinon, ou en cas d'échec / empreinte différente → téléchargement S3
+  habituel. L'événement « file_done » indique la source (LAN / local).
+
+`lan_host`/`lan_port` sont envoyés à l'enregistrement et à chaque heartbeat
+(première IPv4 non interne). Pare-feu : autoriser le port TCP 443 (ou
+47832 en repli) en entrée sur les postes qui envoient des fichiers. Le
+transport est HTTP en clair sur le LAN (jeton pair + md5) — pas de TLS,
+sinon il faudrait un certificat par poste.
+
+## Publication (Release) et numéro de version
+
+Workflow `.github/workflows/release.yml` : lancé **sans numéro** (« Run
+workflow »), il prend le dernier tag `vX.Y.Z` du dépôt et **incrémente le
+dernier chiffre** (2.0.6 → 2.0.7), construit les installeurs avec ce numéro
+(`npm version`), publie sur S3 puis pose le tag `v2.0.7` sur le commit —
+le prochain lancement repart de là. Un numéro saisi ou un tag poussé à la
+main restent prioritaires. La version installée est affichée dans le
+bandeau et le titre de la fenêtre de l'agent, dans l'info-bulle du tray,
+et par poste dans PrintIOS → Synchronisation (`app_version`).
+
+## Installation pré-configurée (espace client détecté)
+
+Deux mécanismes, complémentaires :
+
+1. **Nom de l'installeur.** Téléchargé depuis la page Synchronisation d'un
+   espace, l'installeur s'appelle
+   `PackSpace-S3-Sync-1.2.3-win-x64-t_<espace>-a_<hôte api>.exe` (même
+   binaire S3, nom posé par le `Content-Disposition` présigné, voir API2
+   `DesktopSyncController::installerSuffix`). À l'installation, NSIS écrit ce
+   nom dans `install-source.txt` (`build/installer.nsh`, `customInstall`) ;
+   au premier lancement, si rien n'est configuré, l'agent pré-remplit
+   l'adresse de l'API et l'espace client (`src/main.js`
+   `bootstrapFromInstaller`).
+2. **Lien depuis le navigateur.** La page Synchronisation propose « Connecter
+   l'agent installé à cet espace » →
+   `printios-sync://connect?api=https://api.printios.ma&tenant=<espace>[&logon=…]`
+   (schéma enregistré par l'agent : `protocols` dans `package.json`,
+   `app.setAsDefaultProtocolClient`). L'agent s'ouvre avec les champs
+   pré-remplis (`auth:prefill`), il ne reste que le mot de passe.
+
+## Multi-client PrintIOS (API2 multi-tenant)
+
+Sur PrintIOS, **une seule API** (`https://api.printios.ma`) sert tous les
+clients ; l'espace client est transmis dans l'en-tête `X-Tenant` sur chaque
+appel (résolu côté API2 par `ResolveTenant` : slug, sous-domaine ou domaine
+propre). À la connexion, on saisit seulement l'**Espace client** — l'adresse de l'API
+n'est **jamais affichée** ; elle est **déduite** (`api.resolveServerForTenant` : `api.<domaine parent>` pour
+`packspace.printios.ma`, `api.<domaine>` pour un domaine propre, sinon l'API
+par défaut `https://api.printios.ma`, chaque candidate vérifiée par `/ping` +
+`/tenancy/host`). Le champ accepte
+indifféremment :
+
+- le slug : `packspace` ;
+- l'hôte de l'espace : `packspace.printios.ma` ou un domaine propre
+  (`om.packspace.ma`) ;
+- le lien d'accès complet : `https://om.printios.ma/t/packspace` (démo).
+
+« Tester » interroge `GET /tenancy/host` (public) et signale un espace
+inconnu ; à la connexion, un 404 « tenant inconnu » est traduit en message
+clair. Champ vide = API Packspace dédiée (mono-client), comportement
+inchangé. La valeur est mémorisée (`tenant` dans la config, voir
+`src/store.js`) et rejouée par `api.client()` (`tenantHeaders()`).
 
 ## Pilotage depuis l'app B2B
 

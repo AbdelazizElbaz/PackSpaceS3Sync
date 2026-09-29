@@ -64,7 +64,20 @@ const store = new Conf({
   configName: "packspace-s3-sync-config",
   defaults: {
     serverUrl: "",
+    // Multi-client PrintIOS (API2 multi-tenant, voir docs/multi-tenant.md du
+    // monorepo) : espace client envoyé dans l'en-tête X-Tenant — slug
+    // ("packspace") ou hôte de l'espace ("packspace.printios.ma",
+    // "om.packspace.ma"). Vide = API mono-client (Packspace historique).
+    tenant: "",
     token: "",
+    // Rôle du compte connecté : sync_agent/admin/operator → synchro S3 ;
+    // vendeur/admin/operator → envoi de fichiers (voir api.js).
+    role: "",
+    // Partage de fichiers entre agents sur le LAN (voir peerServer.js) :
+    // jeton pair remis par l'API à l'enregistrement, copies locales déclarées.
+    peerToken: "",
+    peerPort: 443, // serveur pair LAN (repli automatique sur 47832 si occupé)
+    localCopies: {},
     userLabel: "",
     downloadDir: "",
     pollIntervalMs: 5000,

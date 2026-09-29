@@ -634,6 +634,15 @@ class SyncManager {
       this.fail(item, describe(err, "Échec de la signature S3"), true)
       return
     }
+    // Copies locales connues (même PC ou autre agent du magasin, voir
+    // peerServer.js / API2 FileLocalCopyController) : le worker les essaie
+    // avant S3. Optimisation seulement — en cas d'échec, S3 comme avant.
+    let localCopies = []
+    try {
+      localCopies = await api.lookupLocalCopies(item.key)
+    } catch {
+      localCopies = []
+    }
 
     const destPath = path.join(inst.localDir, ...item.relative.split("/").filter(Boolean).map(sanitize))
     item.destPath = destPath
@@ -649,7 +658,10 @@ class SyncManager {
         item.speed = msg.speed
         this.emit()
       } else if (msg.type === "done") {
+        if (msg.source === "lan") item.source = "lan"
         this.finish(item)
+      } else if (msg.type === "info") {
+        this.queueEvent({ type: "file_done", level: "info", message: msg.message, s3_key: item.key, instance_id: item.instanceId })
       } else if (msg.type === "error") {
         this.fail(item, msg.message, msg.retryable && !msg.cancelled, msg.status)
       }
@@ -665,6 +677,8 @@ class SyncManager {
       job: {
         id: item.jobKey,
         url,
+        s3Key: item.key,
+        localCopies,
         destPath,
         chunkSizeBytes: this.setting("chunkSizeMb", 8) * 1024 * 1024,
         chunkThresholdBytes: this.setting("chunkThresholdMb", 16) * 1024 * 1024,

@@ -31,7 +31,7 @@ let tray = null
 let backend = null
 let lastAuthLost = false
 
-const autoLauncher = new AutoLaunch({ name: "PackSpace S3 Sync" })
+const autoLauncher = new AutoLaunch({ name: "PackSpace S3 Sync" }) // nom technique conservé (démarrage auto existant)
 
 function iconImage() {
   const iconPath = path.join(__dirname, "..", "build", "icon.png")
@@ -102,7 +102,7 @@ function buildTrayMenu() {
 
 function buildTray() {
   tray = new Tray(iconImage())
-  tray.setToolTip(`PackSpace S3 Sync v${api.APP_VERSION}`)
+  tray.setToolTip(`PrintIOS Sync v${api.APP_VERSION}`)
   buildTrayMenu()
   tray.on("click", () => createWindow())
 }
@@ -129,7 +129,7 @@ async function checkForUpdateAndNotify() {
   pendingUpdate = info?.available ? info : null
   buildTrayMenu()
   if (tray) {
-    tray.setToolTip(pendingUpdate ? `PackSpace S3 Sync v${api.APP_VERSION} — mise à jour v${pendingUpdate.version} disponible` : `PackSpace S3 Sync v${api.APP_VERSION}`)
+    tray.setToolTip(pendingUpdate ? `PrintIOS Sync v${api.APP_VERSION} — mise à jour v${pendingUpdate.version} disponible` : `PrintIOS Sync v${api.APP_VERSION}`)
   }
   if (!pendingUpdate || pendingUpdate.version === notifiedUpdateVersion) return
   notifiedUpdateVersion = pendingUpdate.version
@@ -139,7 +139,7 @@ async function checkForUpdateAndNotify() {
   }
   if (Notification.isSupported()) {
     const n = new Notification({
-      title: "PackSpace S3 Sync — mise à jour disponible",
+      title: "PrintIOS Sync — mise à jour disponible",
       body: `Version v${pendingUpdate.version} disponible (actuelle : v${pendingUpdate.current || "?"}). Cliquez pour mettre à jour.`,
       icon: iconImage(),
     })
@@ -172,7 +172,7 @@ function pushState(state) {
   }
   if (tray) {
     const active = (state.items || []).filter((i) => i.status === "downloading")
-    const prefix = backend && backend.kind === "service" ? "PackSpace S3 Sync (service)" : "PackSpace S3 Sync"
+    const prefix = backend && backend.kind === "service" ? "PrintIOS Sync (service)" : "PrintIOS Sync"
     if (active.length === 0) {
       tray.setToolTip(state.paused ? `${prefix} — en pause` : prefix)
     } else {
@@ -250,19 +250,93 @@ class ServiceBackend {
   }
 }
 
+// Serveur pair LAN (fichiers envoyés depuis ce poste, voir peerServer.js).
+// Démarré dans le processus principal ; en mode service, le service l'a
+// déjà (le port est alors occupé : simple avertissement).
+let peerServer = null
+function startPeerServer() {
+  if (peerServer) return
+  try {
+    peerServer = require("./peerServer").startPeerServer({
+      token: () => store.get("peerToken"),
+      version: api.APP_VERSION,
+      hostname: api.HOSTNAME,
+      log: (level, message) => { if (level !== "info") console.warn(message) },
+    })
+  } catch (err) {
+    console.warn("Serveur pair non démarré :", err.message)
+  }
+}
+
 function startBackend() {
   if (backend) backend.stop().catch(() => {})
   backend = store.get("mode") === "service" ? new ServiceBackend() : new LocalBackend()
   backend.start()
+  startPeerServer()
 }
+
+// ---------- pré-remplissage de la connexion ----------
+// 1) Nom de l'installeur (install-source.txt écrit par NSIS, voir
+//    build/installer.nsh) : « …-t_<espace>-a_<hôte api>.exe » → adresse de
+//    l'API + espace client, si rien n'est encore configuré.
+// 2) Lien depuis le navigateur (page Synchronisation du B2B) :
+//    printios-sync://connect?api=https://api.printios.ma&tenant=packspace[&logon=…]
+//    → mêmes champs, poussés à l'écran de connexion (auth:prefill).
+function parseInstallerName(name) {
+  const t = /-t_([a-z0-9.-]+)/i.exec(name || "")
+  const a = /-a_([a-z0-9.-]+)/i.exec(name || "")
+  if (!t && !a) return null
+  return { tenant: t ? t[1] : "", serverUrl: a ? `https://${a[1]}` : "" }
+}
+function bootstrapFromInstaller() {
+  try {
+    if (store.get("serverUrl") || store.get("bootstrapDone")) return
+    const fs = require("fs")
+    const candidates = [path.join(path.dirname(process.execPath), "install-source.txt"), path.join(process.resourcesPath || "", "..", "install-source.txt")]
+    for (const f of candidates) {
+      if (!fs.existsSync(f)) continue
+      const parsed = parseInstallerName(fs.readFileSync(f, "utf8").trim())
+      store.set("bootstrapDone", true)
+      if (!parsed) return
+      if (parsed.serverUrl) store.set("serverUrl", parsed.serverUrl)
+      if (parsed.tenant) store.set("tenant", parsed.tenant)
+      return
+    }
+  } catch {
+    // best effort
+  }
+}
+function handleDeepLink(rawUrl) {
+  try {
+    const u = new URL(String(rawUrl || ""))
+    if (!["printios-sync:", "packspace-sync:"].includes(u.protocol)) return
+    const api = u.searchParams.get("api") || ""
+    const tenant = u.searchParams.get("tenant") || ""
+    const logon = u.searchParams.get("logon") || ""
+    if (api) store.set("serverUrl", api)
+    if (tenant) store.set("tenant", tenant)
+    createWindow()
+    const push = () => { if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send("auth:prefill", { serverUrl: api, tenant, logon }) }
+    if (mainWindow?.webContents.isLoading()) mainWindow.webContents.once("did-finish-load", push)
+    else setTimeout(push, 300)
+  } catch {
+    // lien invalide : ignoré
+  }
+}
+const deepLinkArg = (argv) => (argv || []).find((a) => /^(printios-sync|packspace-sync):\/\//i.test(a))
 
 app.whenReady().then(() => {
   // Requis sur Windows pour que les notifications système s'affichent
   // (doit correspondre à build.appId dans package.json).
   if (process.platform === "win32") app.setAppUserModelId("ma.packspace.s3sync")
+  // Liens printios-sync:// depuis le navigateur (voir handleDeepLink)
+  try { app.setAsDefaultProtocolClient("printios-sync"); app.setAsDefaultProtocolClient("packspace-sync") } catch { /* ignore */ }
+  bootstrapFromInstaller()
   buildTray()
   createWindow()
   startBackend()
+  const link = deepLinkArg(process.argv)
+  if (link) handleDeepLink(link)
   scheduleUpdateNotifications()
 
   if (store.get("autoLaunch")) {
@@ -272,7 +346,13 @@ app.whenReady().then(() => {
   }
 })
 
-app.on("second-instance", () => createWindow())
+app.on("second-instance", (_e, argv) => {
+  const link = deepLinkArg(argv)
+  if (link) handleDeepLink(link)
+  else createWindow()
+})
+// macOS : le lien arrive par open-url
+app.on("open-url", (event, url) => { event.preventDefault(); handleDeepLink(url) })
 
 app.on("window-all-closed", (event) => {
   // App "tray" : ne quitte jamais seule.
@@ -319,6 +399,7 @@ async function configSnapshot() {
     serviceUnreachable = err.message
     cfg = {
       serverUrl: store.get("serverUrl"),
+      tenant: store.get("tenant") || "",
       userLabel: store.get("userLabel"),
       isLoggedIn: !!store.get("token"),
       agentLabel: store.get("agentLabel") || "",
@@ -348,6 +429,39 @@ ipcMain.handle("config:chooseDir", async () => {
   return res.filePaths[0]
 })
 
+// ---------- envoi de fichiers (conception / montage) sur une commande ----------
+// Exécuté dans le processus principal (pas dans le service) : le fichier est
+// choisi par l'utilisateur dans SA session, avec ses droits d'accès ; la
+// progression est poussée à la fenêtre (upload:progress).
+ipcMain.handle("upload:pickFile", async () => {
+  const res = await dialog.showOpenDialog(mainWindow, {
+    properties: ["openFile"],
+    filters: [
+      { name: "Fichiers d'impression / conception", extensions: ["pdf", "ai", "eps", "psd", "tif", "tiff", "png", "jpg", "jpeg", "svg", "cdr", "zip"] },
+      { name: "Tous les fichiers", extensions: ["*"] },
+    ],
+  })
+  if (res.canceled || !res.filePaths[0]) return null
+  const fs = require("fs")
+  const p = res.filePaths[0]
+  return { path: p, name: require("path").basename(p), size: fs.statSync(p).size }
+})
+ipcMain.handle("upload:getOrder", wrap(async (_e, orderId) => api.getOrder(orderId)))
+// Ouvre un fichier d'article (URL S3 présignée) dans le navigateur par défaut.
+ipcMain.handle("upload:openFile", wrap(async (_e, s3Key) => { const url = await api.fileUrl(s3Key); await shell.openExternal(url); return true }))
+ipcMain.handle("upload:start", wrap(async (_e, payload) => {
+  const send = (p) => { if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send("upload:progress", { ...p, itemId: payload.itemId, kind: payload.kind }) }
+  try {
+    const out = await api.uploadItemFile({ ...payload, onProgress: send })
+    send({ bytes: out.size, size: out.size, done: true, name: out.name })
+    return out
+  } catch (err) {
+    const message = err?.response?.data?.message || err.message
+    send({ error: message })
+    throw new Error(message)
+  }
+}))
+
 ipcMain.handle("config:setAutoLaunch", async (_e, enabled) => {
   store.set("autoLaunch", !!enabled)
   if (enabled) await autoLauncher.enable().catch(() => {})
@@ -363,9 +477,10 @@ ipcMain.handle("auth:login", wrap(async (_e, payload) => {
   return out
 }))
 
-ipcMain.handle("auth:ping", async (_e, serverUrl) => {
+ipcMain.handle("auth:resolveTenant", wrap(async (_e, tenant, hint = "") => backend.call("resolveTenant", [tenant, hint], 40000)))
+ipcMain.handle("auth:ping", async (_e, serverUrl, tenant = "") => {
   try {
-    return await backend.call("ping", [serverUrl])
+    return await backend.call("ping", [serverUrl, tenant])
   } catch (err) {
     const status = err?.response?.status
     if (status === 404) throw new Error("L'API répond mais sans /ping : version API2 trop ancienne (redéployer).")

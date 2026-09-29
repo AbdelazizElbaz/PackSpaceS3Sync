@@ -8,6 +8,21 @@ let lastState = { items: [], instances: [] }
 
 // ---------- helpers ----------
 
+// Message d'erreur lisible : Electron préfixe les erreurs IPC par
+// « Error invoking remote method 'auth:ping': Error: … » — retiré, et les
+// codes HTTP traduits (503 = serveur indisponible, etc.).
+function errMsg(e, fallback = "Erreur") {
+  let m = String(e?.message || e || fallback)
+  m = m.replace(/^Error invoking remote method '[^']*':\s*/i, "").replace(/^Error:\s*/i, "")
+  const code = /status code (\d{3})/i.exec(m)?.[1]
+  if (code) {
+    const known = { 401: "identifiants refusés", 403: "accès refusé", 404: "espace ou service introuvable", 429: "trop de tentatives, réessayez dans une minute", 500: "erreur du serveur", 502: "serveur injoignable (502)", 503: "service indisponible pour le moment (503)", 504: "serveur trop lent (504)" }
+    m = known[code] ? `${known[code]}` : m
+  }
+  if (/ENOTFOUND|EAI_AGAIN|ECONNREFUSED|ETIMEDOUT|Network Error/i.test(m)) m = "Connexion impossible : vérifiez le réseau et l'espace client."
+  return m
+}
+
 function fmtBytes(n) {
   if (!n) return "0 o"
   if (n < 1024) return `${n} o`
@@ -37,7 +52,7 @@ async function loadBrowse(prefix = currentPrefix) {
     renderCrumbs()
     renderBrowse(data)
   } catch (e) {
-    err.textContent = e?.message || "Impossible de lister le dossier."
+    err.textContent = errMsg(e, "Impossible de lister le dossier.")
     list.innerHTML = ""
   }
 }
@@ -140,7 +155,7 @@ function renderInstances(state) {
       try {
         await window.agent.updateInstance(Number(c.dataset.id), { deleteRemoved: c.checked })
       } catch (e) {
-        alert(e?.message || "Impossible de modifier l'option.")
+        alert(errMsg(e, "Impossible de modifier l'option."))
         c.checked = !c.checked
       }
     })
@@ -298,11 +313,24 @@ async function refreshConfig() {
   const c = await window.agent.getConfig()
   $("modeBadge").classList.toggle("hidden", !["service", "web"].includes(c.mode))
   renderServiceBanner(c.serviceUnreachable)
-  if (c.appVersion) $("appVersion").textContent = `v${c.appVersion}`
+  if (c.appVersion) {
+    // Version visible partout : bandeau, titre de la fenêtre (barre des
+    // tâches) — même version que celle publiée par le workflow Release.
+    $("appVersion").textContent = `v${c.appVersion}`
+    document.title = `PrintIOS Sync v${c.appVersion}`
+  }
   if (c.isLoggedIn) {
     $("loginView").classList.add("hidden")
     $("mainView").classList.remove("hidden")
-    $("userLabel").textContent = `${c.userLabel || ""} · ${c.agentLabel || c.hostname || ""}`
+    $("userLabel").textContent = `${c.userLabel || ""}${c.role ? ` (${c.role})` : ""} · ${c.agentLabel || c.hostname || ""}`
+    // Selon le rôle (voir api.js) : synchro S3 (sync_agent/admin/opérateur)
+    // et/ou envoi de fichiers sur les commandes (vendeur/admin/opérateur).
+    const canSync = c.canSync !== false
+    const canUpload = !!c.canUpload
+    $("explorerPane").classList.toggle("hidden", !canSync)
+    $("syncHead").classList.toggle("hidden", !canSync)
+    $("syncBody").classList.toggle("hidden", !canSync)
+    $("uploadPanel").classList.toggle("hidden", !canUpload)
     $("autoLaunchToggle").checked = !!c.autoLaunch
     $("autoUpdateToggle").checked = Number(c.autoUpdate) === 1
     for (const k of SETTINGS) $(k).value = c[k]
@@ -313,23 +341,80 @@ async function refreshConfig() {
     $("mainView").classList.add("hidden")
     $("userLabel").textContent = ""
     if (c.serverUrl) $("serverUrl").value = c.serverUrl
+    if (c.tenant) $("tenant").value = c.tenant
+    if (c.tenant) detectTenant()
   }
 }
+
+// Détection automatique de l'espace : dès que le champ est rempli (installeur,
+// lien printios-sync://, saisie), l'API est déduite et l'espace affiché AVANT
+// la connexion (carte « Espace »). Debounce 600 ms sur la saisie.
+let detectTimer = null
+let detectSeq = 0
+async function detectTenant() {
+  const card = $("tenantCard")
+  const tenantIn = $("tenant").value.trim()
+  const seq = ++detectSeq
+  if (!tenantIn) { card.classList.add("hidden"); return }
+  card.classList.remove("hidden", "err")
+  $("tenantName").textContent = tenantIn
+  $("tenantMeta").textContent = "détection…"
+  try {
+    const r = await window.agent.resolveTenant(tenantIn, $("serverUrl").value.trim())
+    if (seq !== detectSeq) return
+    if (!$("serverUrl").value.trim()) $("serverUrl").value = r.serverUrl
+    $("tenantName").textContent = r.name || r.tenant || tenantIn
+    // L'adresse de l'API n'est JAMAIS affichée (demande explicite) : seul
+    // l'espace client (nom du magasin + identifiant) est montré.
+    $("tenantMeta").textContent = r.tenancy ? `${r.tenant}${r.check?.type === "demo" ? " (démo)" : ""}` : "espace dédié"
+  } catch (e) {
+    if (seq !== detectSeq) return
+    card.classList.add("err")
+    $("tenantMeta").textContent = errMsg(e, "espace introuvable")
+  }
+}
+$("tenant").addEventListener("input", () => { clearTimeout(detectTimer); detectTimer = setTimeout(detectTenant, 600) })
 
 $("pingBtn").addEventListener("click", async () => {
   const out = $("pingResult")
   out.className = "hint"
   out.textContent = "Test en cours…"
   try {
-    const r = await window.agent.ping($("serverUrl").value.trim())
+    // Espace client saisi → l'adresse de l'API est déduite (sauf champ avancé
+    // renseigné) et vérifiée ; l'API retenue est affichée.
+    const tenantIn = $("tenant").value.trim()
+    let serverUrl = $("serverUrl").value.trim()
+    if (tenantIn) {
+      const res = await window.agent.resolveTenant(tenantIn, serverUrl)
+      serverUrl = res.serverUrl
+      $("serverUrl").value = serverUrl
+    }
+    if (!serverUrl) throw new Error("Indiquez votre espace client.")
+    const r = await window.agent.ping(serverUrl, tenantIn)
     const recent = Number(r.desktop_api || 0) >= 2
-    out.className = recent ? "hint ok" : "hint err"
-    out.textContent = recent
-      ? `OK — ${r.app || "API"} répond sur ${r.serverUrl}`
-      : `L'API répond (${r.serverUrl}) mais sans les endpoints de synchro S3 : redéployer API2.`
+    let ok = recent
+    let text = recent
+      ? `OK — ${r.app || "API"} répond`
+      : `L'API répond mais sans les endpoints de synchro S3 : redéployer API2.`
+    // API multi-client (PrintIOS) : l'espace client est obligatoire et vérifié.
+    if (r.tenancy) {
+      if (r.tenantRequired) {
+        ok = false
+        text += " — API multi-client : indiquez votre espace client."
+      } else if (r.tenantCheck && r.tenantCheck.found === false) {
+        ok = false
+        text += ` — espace client « ${r.tenant} » inconnu.`
+      } else if (r.tenantCheck?.found) {
+        text += ` — espace « ${r.tenantCheck.slug}${r.tenantCheck.type === "demo" ? " (démo)" : ""} »`
+      } else {
+        text += ` — espace « ${r.tenant} » (vérifié à la connexion)`
+      }
+    }
+    out.className = ok ? "hint ok" : "hint err"
+    out.textContent = text
   } catch (e) {
     out.className = "hint err"
-    out.textContent = e?.message || "Échec du test."
+    out.textContent = errMsg(e, "Échec du test.")
   }
 })
 
@@ -337,24 +422,25 @@ $("loginBtn").addEventListener("click", async () => {
   const err = $("loginError")
   err.textContent = ""
   const serverUrl = $("serverUrl").value.trim()
+  const tenant = $("tenant").value.trim()
   const logon = $("logon").value.trim()
   const password = $("password").value
-  if (!serverUrl || !logon || !password) {
-    err.textContent = "Tous les champs sont obligatoires."
+  if ((!serverUrl && !tenant) || !logon || !password) {
+    err.textContent = "Espace client, identifiant et mot de passe sont obligatoires."
     return
   }
   const btn = $("loginBtn")
   btn.disabled = true
   btn.textContent = "Connexion…"
   try {
-    await window.agent.login({ serverUrl, logon, password })
+    await window.agent.login({ serverUrl, tenant, logon, password })
     $("password").value = ""
     await refreshConfig()
     // La vérification de version faite au démarrage a pu échouer (pas
     // encore connecté) : on la relance tout de suite.
     refreshUpdateBanner()
   } catch (e) {
-    err.textContent = e?.message || "Échec de connexion."
+    err.textContent = errMsg(e, "Échec de connexion.")
   } finally {
     btn.disabled = false
     btn.textContent = "Se connecter"
@@ -399,7 +485,7 @@ $("instSaveBtn").addEventListener("click", async () => {
     await window.agent.addInstance({ name, prefix, localDir, deleteRemoved: $("instDeleteRemoved").checked })
     $("instanceDialog").classList.add("hidden")
   } catch (e) {
-    $("instError").textContent = e?.message || "Impossible de créer l'instance."
+    $("instError").textContent = errMsg(e, "Impossible de créer l'instance.")
   }
 })
 
@@ -423,7 +509,7 @@ $("saveSettingsBtn").addEventListener("click", async () => {
     await window.agent.setSettings(partial)
     $("settingsDialog").classList.add("hidden")
   } catch (e) {
-    alert(e?.message || "Impossible d'enregistrer les réglages.")
+    alert(errMsg(e, "Impossible d'enregistrer les réglages."))
   }
 })
 $("autoLaunchToggle").addEventListener("change", (e) => window.agent.setAutoLaunch(e.target.checked))
@@ -479,7 +565,7 @@ async function refreshServiceStatus() {
   } catch (e) {
     badge.textContent = "erreur"
     badge.className = "badge err"
-    info.textContent = e?.message || "Impossible de lire l'état du service."
+    info.textContent = errMsg(e, "Impossible de lire l'état du service.")
   }
 }
 
@@ -493,7 +579,7 @@ $("settingsBtn").addEventListener("click", () => {
 $("serviceInstallBtn").addEventListener("click", async () => {
   if (
     !confirm(
-      "Installer PackSpace S3 Sync comme service de l'ordinateur ?\n\n" +
+      "Installer PrintIOS Sync comme service de l'ordinateur ?\n\n" +
         "• L'agent continuera à synchroniser même session fermée.\n" +
         "• Une élévation (administrateur) va être demandée.\n" +
         "• La configuration actuelle (connexion, instances, fichiers déjà synchronisés) est reprise par le service : rien n'est retéléchargé.\n" +
@@ -509,7 +595,7 @@ $("serviceInstallBtn").addEventListener("click", async () => {
     await refreshConfig()
     await refreshServiceStatus()
   } catch (e) {
-    alert(e?.message || "Installation du service impossible.")
+    alert(errMsg(e, "Installation du service impossible."))
   } finally {
     btn.disabled = false
     btn.textContent = "Installer le service"
@@ -560,7 +646,7 @@ $("serviceUninstallBtn").addEventListener("click", async () => {
     await refreshConfig()
     await refreshServiceStatus()
   } catch (e) {
-    alert(e?.message || "Désinstallation du service impossible.")
+    alert(errMsg(e, "Désinstallation du service impossible."))
   } finally {
     btn.disabled = false
     btn.textContent = "Désinstaller le service"
@@ -619,7 +705,7 @@ $("updateApplyBtn").addEventListener("click", async () => {
     btn.classList.add("hidden")
     $("updateDismissBtn").classList.add("hidden")
   } catch (e) {
-    renderUpdateProgress({ active: false, phase: "error", message: e?.message || "Mise à jour impossible.", version: updateInfo?.version })
+    renderUpdateProgress({ active: false, phase: "error", message: errMsg(e, "Mise à jour impossible."), version: updateInfo?.version })
     btn.disabled = false
     btn.textContent = "Mettre à jour maintenant"
   }
@@ -629,7 +715,7 @@ setInterval(refreshUpdateBanner, 2 * 60 * 60 * 1000)
 // Tant qu'aucune vérification n'a abouti (pas connecté au démarrage,
 // réseau…), on réessaie toutes les 5 min plutôt que d'attendre 2 h.
 setInterval(() => {
-  if (!updateInfo || updateInfo.reason === "not_logged_in" || updateInfo.reason === "error") refreshUpdateBanner()
+  if (!updateInfo || updateInfo.reason === "no_server" || updateInfo.reason === "not_logged_in" || updateInfo.reason === "error") refreshUpdateBanner()
 }, 5 * 60 * 1000)
 
 // Réglages → "Vérifier maintenant" + ligne d'état lisible (version installée,
@@ -648,6 +734,7 @@ function renderUpdateCheckStatus() {
   }
   const why = {
     not_logged_in: "connectez-vous pour vérifier les mises à jour",
+    no_server: "renseignez l'adresse de l'API pour vérifier les mises à jour",
     no_release: updateInfo.message || "aucune version publiée sur le serveur",
     up_to_date: `à jour (dernière publiée : v${updateInfo.version || "?"})`,
     no_asset_for_platform: `v${updateInfo.version} publiée mais sans installeur pour cette plateforme`,
@@ -689,12 +776,107 @@ $("pauseBtn").addEventListener("click", async () => {
   else await window.agent.pause()
 })
 
+// ---------- envoi de fichiers (conception / montage) ----------
+let uploadOrder = null
+const uploadStatus = {} // `${itemId}:${kind}` → { bytes, size, done, error, name }
+
+function renderUploadOrder() {
+  const box = $("uploadOrder")
+  if (!uploadOrder) { box.innerHTML = "" ; return }
+  const o = uploadOrder
+  const meta = `<div class="order-meta">Commande <strong>#${o.id}</strong> · ${o.stat || ""}${o.reseller ? ` · ${o.reseller}` : ""}${o.date ? ` · ${String(o.date).slice(0, 10)}` : ""}${o.print_file ? ` · Fichier commande : <a href="#" data-open="${encodeURIComponent(o.print_file_key || "")}">${o.print_file}</a>` : ""}</div>`
+  const items = (o.items || []).map((it) => {
+    const st = (kind) => uploadStatus[`${it.id}:${kind}`]
+    const bar = (kind) => {
+      const s = st(kind)
+      if (!s) return ""
+      if (s.error) return `<div class="item-status err">${kind === "design" ? "Conception" : "Montage"} : ${s.error}</div>`
+      if (s.done) return `<div class="item-status ok">${kind === "design" ? "Conception" : "Montage"} envoyé : ${s.name || ""}</div>`
+      const pct = s.size ? Math.round((s.bytes / s.size) * 100) : 0
+      return `<progress max="100" value="${pct}"></progress><div class="item-status">${kind === "design" ? "Conception" : "Montage"} : ${pct}% (${fmtBytes(s.bytes)} / ${fmtBytes(s.size)})</div>`
+    }
+    return `<div class="upload-item" data-item="${it.id}">
+      <div>
+        <div class="item-name">${it.name}${it.quantity ? ` ×${it.quantity}` : ""}</div>
+        <div class="item-files">
+          <span>Conception : ${it.design_file ? `<a href="#" data-open="${encodeURIComponent(it.design_file_key || "")}">${it.design_file}</a>` : "—"}</span>
+          <span>Montage / impression : ${it.print_file ? `<a href="#" data-open="${encodeURIComponent(it.print_file_key || "")}">${it.print_file}</a>` : "—"}</span>
+        </div>
+      </div>
+      <button class="small" data-upload="design" data-item="${it.id}">Fichier de conception…</button>
+      <button class="small primary" data-upload="print" data-item="${it.id}">Fichier de montage…</button>
+      ${bar("design")}${bar("print")}
+    </div>`
+  }).join("")
+  box.innerHTML = meta + (items || `<p class="empty">Aucun article sur cette commande.</p>`)
+  box.querySelectorAll("button[data-upload]").forEach((b) => b.addEventListener("click", () => startUpload(Number(b.dataset.item), b.dataset.upload)))
+  // Fichiers déjà rattachés : clic = ouverture (URL présignée) dans le navigateur.
+  box.querySelectorAll("a[data-open]").forEach((a) => a.addEventListener("click", async (e) => {
+    e.preventDefault()
+    const key = decodeURIComponent(a.dataset.open || "")
+    if (!key) return
+    try { await window.agent.openItemFile(key) } catch (err) { $("uploadError").textContent = errMsg(err, "Impossible d'ouvrir le fichier.") }
+  }))
+}
+
+async function loadUploadOrder() {
+  const err = $("uploadError")
+  err.textContent = ""
+  const id = $("uploadOrderId").value.trim().replace(/^#|^ORD-/i, "")
+  if (!id) return
+  try {
+    uploadOrder = await window.agent.getOrder(id)
+    Object.keys(uploadStatus).forEach((k) => delete uploadStatus[k])
+    renderUploadOrder()
+  } catch (e) {
+    uploadOrder = null
+    renderUploadOrder()
+    err.textContent = errMsg(e, "Commande introuvable.")
+  }
+}
+
+async function startUpload(itemId, kind) {
+  const file = await window.agent.pickUploadFile()
+  if (!file || !uploadOrder) return
+  const key = `${itemId}:${kind}`
+  uploadStatus[key] = { bytes: 0, size: file.size, name: file.name }
+  renderUploadOrder()
+  try {
+    await window.agent.uploadItemFile({ orderId: uploadOrder.id, itemId, filePath: file.path, kind })
+    // Recharge la commande pour afficher le fichier rattaché.
+    const fresh = await window.agent.getOrder(uploadOrder.id)
+    uploadOrder = fresh
+    uploadStatus[key] = { ...uploadStatus[key], done: true }
+  } catch (e) {
+    uploadStatus[key] = { ...uploadStatus[key], error: errMsg(e, "Échec de l'envoi.") }
+  }
+  renderUploadOrder()
+}
+
+$("uploadLoadBtn").addEventListener("click", loadUploadOrder)
+$("uploadOrderId").addEventListener("keydown", (e) => { if (e.key === "Enter") loadUploadOrder() })
+window.agent.onUploadProgress((p) => {
+  const key = `${p.itemId}:${p.kind}`
+  if (!uploadStatus[key]) return
+  uploadStatus[key] = { ...uploadStatus[key], ...p }
+  renderUploadOrder()
+})
+
 // ---------- init ----------
 
 window.agent.onStateUpdate(render)
+// Lien printios-sync://connect?api=…&tenant=…&logon=… depuis le navigateur :
+// remplit l'écran de connexion (l'utilisateur n'a plus que le mot de passe).
+if (window.agent.onAuthPrefill) window.agent.onAuthPrefill((p) => {
+  if (p?.serverUrl) $("serverUrl").value = p.serverUrl
+  if (p?.tenant) $("tenant").value = p.tenant
+  if (p?.logon) $("logon").value = p.logon
+  detectTenant()
+  $("password").focus()
+})
 window.agent.onAuthLost(async () => {
   await refreshConfig()
-  $("loginError").textContent = "Session terminée : ce poste a été supprimé depuis Packspace ou le jeton a expiré. Reconnectez-vous."
+  $("loginError").textContent = "Session terminée : ce poste a été supprimé depuis PrintIOS ou le jeton a expiré. Reconnectez-vous."
 })
 refreshConfig()
 window.agent.getState().then(render)

@@ -31,7 +31,7 @@ const Engine = require("./engine")
 // utilisateur.
 
 const SERVICE_LABEL = "PackSpace S3 Sync"
-const SERVICE_DESCRIPTION = "Synchronisation des fichiers d'impression Packspace (S3 → dossiers locaux)"
+const SERVICE_DESCRIPTION = "Synchronisation des fichiers d'impression PrintIOS (S3 → dossiers locaux)"
 const WIN_SERVICE_ID = "packspaces3sync.exe" // id généré par node-windows à partir du nom
 const LINUX_UNIT = "packspace-s3-sync.service"
 const MAC_LABEL = "ma.packspace.s3sync"

@@ -39,8 +39,14 @@ class Engine {
     return () => this.listeners.delete(fn)
   }
 
+  // Synchro S3 uniquement pour les rôles autorisés (un vendeur connecté
+  // n'a que l'envoi de fichiers : les endpoints /desktop/* lui répondraient 403).
+  canSync() {
+    return !store.get("token") || api.SYNC_ROLES.includes(store.get("role") || "sync_agent")
+  }
+
   start() {
-    this.sync.start()
+    if (this.canSync()) this.sync.start()
   }
 
   async stop() {
@@ -80,7 +86,11 @@ class Engine {
     const server = store.get("serverSettings") || {}
     const out = {
       serverUrl: store.get("serverUrl"),
+      tenant: store.get("tenant") || "",
       userLabel: store.get("userLabel"),
+      role: store.get("role") || "",
+      canSync: this.canSync(),
+      canUpload: api.UPLOAD_ROLES.includes(store.get("role") || ""),
       isLoggedIn: !!store.get("token"),
       agentId: store.get("agentId") || null,
       agentLabel: store.get("agentLabel") || "",
@@ -115,8 +125,13 @@ class Engine {
     return this.getConfig()
   }
 
-  ping(serverUrl) {
-    return api.ping(serverUrl)
+  ping(serverUrl, tenant = "") {
+    return api.ping(serverUrl, tenant)
+  }
+
+  // Espace client → adresse d'API déduite + vérification (voir api.resolveServerForTenant).
+  resolveTenant(tenant, hint = "") {
+    return api.resolveServerForTenant(tenant, hint)
   }
 
   // Vérifie la dernière version publiée (même source que la carte de
@@ -126,8 +141,9 @@ class Engine {
   // release publiée). Ne throw jamais : un souci réseau => juste
   // "non disponible", pas d'erreur qui interromprait l'appelant.
   async checkUpdate() {
-    if (!store.get("serverUrl") || !store.get("token")) {
-      return { available: false, current: api.APP_VERSION, reason: "not_logged_in" }
+    // Sans jeton aussi (écran de connexion) : l'endpoint de version est public.
+    if (!store.get("serverUrl")) {
+      return { available: false, current: api.APP_VERSION, reason: "no_server" }
     }
     try {
       const rel = await api.fetchLatestRelease()
@@ -167,20 +183,54 @@ class Engine {
     return applyUpdate({ log: this.log, onProgress: () => this.sync.emit() })
   }
 
-  async login({ serverUrl, logon, password }) {
-    const data = await api.login(serverUrl, logon, password)
+  async login({ serverUrl, logon, password, tenant = "" }) {
+    // Adresse d'API absente → déduite de l'espace client.
+    if (!serverUrl && tenant) {
+      const r = await api.resolveServerForTenant(tenant)
+      serverUrl = r.serverUrl
+      tenant = r.tenant
+    }
+    const data = await api.login(serverUrl, logon, password, tenant)
     store.set("serverUrl", data.serverUrl || serverUrl)
+    store.set("tenant", api.normalizeTenant(tenant))
     store.set("token", data.token)
+    store.set("role", data.role || "")
     store.set("userLabel", `${data.first_name || ""} ${data.last_name || ""}`.trim() || data.logon)
     this.sync.registered = false
-    await this.sync.register()
-    // Redémarre la boucle si elle avait été arrêtée par une déconnexion :
-    // le premier scan remet en file les fichiers non terminés, qui
-    // reprennent là où ils s'étaient arrêtés.
-    this.sync.start()
-    this.sync.scanNow()
-    this.log("info", `Connecté (${store.get("userLabel")}) sur ${store.get("serverUrl")}`)
-    return { userLabel: store.get("userLabel"), agentLabel: store.get("agentLabel") }
+    if (this.canSync()) {
+      await this.sync.register()
+      // Redémarre la boucle si elle avait été arrêtée par une déconnexion :
+      // le premier scan remet en file les fichiers non terminés, qui
+      // reprennent là où ils s'étaient arrêtés.
+      this.sync.start()
+      this.sync.scanNow()
+    }
+    this.log("info", `Connecté (${store.get("userLabel")}) sur ${store.get("serverUrl")}${store.get("tenant") ? ` — espace ${store.get("tenant")}` : ""}`)
+    return { userLabel: store.get("userLabel"), agentLabel: store.get("agentLabel"), role: store.get("role"), canSync: this.canSync() }
+  }
+
+  // ---------- envoi de fichiers (conception / montage) ----------
+  getOrder(orderId) {
+    return api.getOrder(orderId)
+  }
+
+  fileUrl(s3Key) {
+    return api.fileUrl(s3Key)
+  }
+
+  // Progression poussée via les listeners d'état (clé uploadProgress) pour
+  // que la fenêtre affiche la barre — même mécanisme que les mises à jour.
+  async uploadItemFile(payload) {
+    const emit = (p) => { for (const fn of this.listeners) fn({ ...(this.lastState || { items: [], instances: [] }), uploadProgress: { ...p, itemId: payload.itemId, kind: payload.kind } }) }
+    try {
+      const out = await api.uploadItemFile({ ...payload, onProgress: emit })
+      emit({ bytes: out.size, size: out.size, done: true })
+      this.log("info", `Fichier ${payload.kind === "design" ? "de conception" : "de montage"} envoyé sur la commande ${payload.orderId} (article ${payload.itemId}) : ${out.name}`)
+      return out
+    } catch (err) {
+      emit({ error: err?.response?.data?.message || err.message })
+      throw new Error(err?.response?.data?.message || err.message)
+    }
   }
 
   async logout() {
@@ -190,6 +240,7 @@ class Engine {
     this.sync.registered = false
     await api.agentOffline()
     store.set("token", "")
+    store.set("role", "")
     store.set("userLabel", "")
     store.set("agentId", null)
     this.log("info", "Déconnecté")
@@ -254,6 +305,10 @@ Engine.METHODS = [
   "checkUpdate",
   "applyUpdate",
   "login",
+  "resolveTenant",
+  "getOrder",
+  "fileUrl",
+  "uploadItemFile",
   "logout",
   "browse",
   "addInstance",

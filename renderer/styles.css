@@ -1,3 +1,26 @@
+/* ---------- connexion : espace détecté ---------- */
+.tenant-card { display: flex; align-items: center; gap: 8px; padding: 8px 10px; margin: 6px 0 10px; border: 1px solid var(--border, #2a2f3a); border-radius: 8px; }
+.tenant-badge { font-size: 11px; text-transform: uppercase; letter-spacing: .04em; opacity: .7; }
+.tenant-card.err { border-color: #f85149; }
+
+/* ---------- connexion : champ API avancé ---------- */
+details.advanced { margin: 4px 0 8px; }
+details.advanced summary { cursor: pointer; }
+details.advanced input { margin-top: 6px; }
+
+/* ---------- envoi de fichiers (conception / montage) ---------- */
+.upload-panel { border-bottom: 1px solid var(--border, #2a2f3a); padding-bottom: 10px; margin-bottom: 10px; }
+.upload-panel .pane-head input { width: 200px; }
+.upload-order { display: grid; gap: 6px; }
+.upload-order .order-meta { font-size: 12px; opacity: .8; }
+.upload-item { display: grid; grid-template-columns: 1fr auto auto; gap: 8px; align-items: center; padding: 8px 10px; border: 1px solid var(--border, #2a2f3a); border-radius: 8px; }
+.upload-item .item-name { font-weight: 600; }
+.upload-item .item-files { font-size: 12px; opacity: .8; }
+.upload-item .item-files span { display: block; }
+.upload-item progress { width: 100%; grid-column: 1 / -1; height: 6px; }
+.upload-item .item-status { grid-column: 1 / -1; font-size: 12px; }
+.upload-item .item-status.ok { color: #3fb950; }
+.upload-item .item-status.err { color: #f85149; }
 * { box-sizing: border-box; }
 html, body { height: 100%; }
 body { margin: 0; font-family: -apple-system, "Segoe UI", Roboto, Arial, sans-serif; background: #f7f8fa; color: #1f2937; font-size: 13px; display: flex; flex-direction: column; }

@@ -7,9 +7,17 @@ contextBridge.exposeInMainWorld("agent", {
   setSettings: (partial) => ipcRenderer.invoke("config:setSettings", partial),
   chooseDir: () => ipcRenderer.invoke("config:chooseDir"),
   setAutoLaunch: (enabled) => ipcRenderer.invoke("config:setAutoLaunch", enabled),
-  ping: (serverUrl) => ipcRenderer.invoke("auth:ping", serverUrl),
+  ping: (serverUrl, tenant) => ipcRenderer.invoke("auth:ping", serverUrl, tenant),
+  resolveTenant: (tenant, hint) => ipcRenderer.invoke("auth:resolveTenant", tenant, hint),
   login: (payload) => ipcRenderer.invoke("auth:login", payload),
   logout: () => ipcRenderer.invoke("auth:logout"),
+
+  // Envoi de fichiers (conception / montage) sur une commande
+  pickUploadFile: () => ipcRenderer.invoke("upload:pickFile"),
+  getOrder: (orderId) => ipcRenderer.invoke("upload:getOrder", orderId),
+  openItemFile: (s3Key) => ipcRenderer.invoke("upload:openFile", s3Key),
+  uploadItemFile: (payload) => ipcRenderer.invoke("upload:start", payload),
+  onUploadProgress: (cb) => ipcRenderer.on("upload:progress", (_e, p) => cb(p)),
 
   // Explorateur S3 (PrintProd)
   browse: (prefix) => ipcRenderer.invoke("s3:browse", prefix),
@@ -39,6 +47,8 @@ contextBridge.exposeInMainWorld("agent", {
   checkUpdate: () => ipcRenderer.invoke("update:check"),
   applyUpdate: () => ipcRenderer.invoke("update:apply"),
 
+  // Pré-remplissage de la connexion (lien printios-sync:// depuis le navigateur)
+  onAuthPrefill: (cb) => ipcRenderer.on("auth:prefill", (_e, p) => cb(p)),
   onAuthLost: (callback) => {
     const listener = () => callback()
     ipcRenderer.on("auth:lost", listener)

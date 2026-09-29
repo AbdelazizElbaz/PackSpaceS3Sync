@@ -43,7 +43,7 @@ on:
         required: false
 
 permissions:
-  contents: read
+  contents: write # pose le tag vX.Y.Z de la version publiée (incrément automatique)
 
 env:
   ENVIRONMENT: Prod
@@ -68,6 +68,8 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # tags nécessaires pour l'incrément automatique
 
       - uses: actions/setup-node@v4
         with:
@@ -80,7 +82,14 @@ jobs:
         run: |
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
             V="${{ github.event.inputs.version }}"
-            [ -n "$V" ] || V="$(node -p "require('./package.json').version")"
+            if [ -z "$V" ]; then
+              # Incrément AUTOMATIQUE : dernier tag vX.Y.Z (ou package.json si aucun) + 1 sur le dernier chiffre.
+              git fetch --tags --force >/dev/null 2>&1 || true
+              LAST="$(git tag -l 'v[0-9]*' | sed 's/^v//' | sort -t. -k1,1n -k2,2n -k3,3n | tail -1)"
+              [ -n "$LAST" ] || LAST="$(node -p "require('./package.json').version")"
+              V="$(echo "$LAST" | awk -F. '{ printf "%d.%d.%d", $1, $2, $3+1 }')"
+              echo "Version auto : $LAST → $V"
+            fi
           else
             V="${GITHUB_REF_NAME#v}"
           fi
@@ -174,6 +183,26 @@ jobs:
 
   # Image conteneur (Synology / Docker) publiée sur GitHub Container Registry :
   #   ghcr.io/<owner>/packspace-s3-sync:<version>  et  :latest
+
+      # Tag de la version publiée → prochain lancement sans numéro = incrément
+      # automatique (voir « Resolve version »). Ignoré si le tag existe déjà
+      # (déclenchement par tag).
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          path: repo
+      - name: Tag version
+        run: |
+          set -e
+          V="$(cat dist/VERSION 2>/dev/null || echo "")"
+          [ -n "$V" ] || { echo "version inconnue, pas de tag"; exit 0; }
+          cd repo
+          git config user.name "github-actions"
+          git config user.email "github-actions@users.noreply.github.com"
+          if git ls-remote --tags origin "refs/tags/v$V" | grep -q .; then echo "tag v$V déjà présent"; exit 0; fi
+          git tag "v$V" "${GITHUB_SHA}"
+          git push origin "v$V"
+
   # Indépendant de S3/Prod : utilise GITHUB_TOKEN (permission packages:write).
   # Multi-arch : amd64 (la plupart des NAS Synology) + arm64 (modèles ARM).
   # DÉSACTIVÉ (sur demande : "désactive packaging docker dans pipeline
