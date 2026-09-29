@@ -2,12 +2,12 @@
 <html lang="fr">
 <head>
   <meta charset="UTF-8" />
-  <title>PackSpace S3 Sync</title>
+  <title>PrintIOS Sync</title>
   <link rel="stylesheet" href="styles.css" />
 </head>
 <body>
   <header class="topbar">
-    <span class="brand">PackSpace S3 Sync <span id="appVersion" class="app-version" title="Version installée"></span></span>
+    <span class="brand">PrintIOS Sync <span id="appVersion" class="app-version" title="Version installée"></span></span>
     <span class="topbar-right">
       <span id="modeBadge" class="mode-badge hidden" title="L'agent tourne comme service : il continue même session fermée">service</span>
       <span id="globalStatus" class="global-status"></span>
@@ -40,19 +40,17 @@
       <strong id="tenantName"></strong>
       <span id="tenantMeta" class="hint"></span>
     </div>
-    <!-- Adresse de l'API : déduite de l'espace client (api.<domaine>), champ
-         avancé replié pour une API dédiée / un cas particulier. -->
-    <details class="advanced">
-      <summary class="hint">Avancé : adresse de l'API (déduite automatiquement de l'espace client)</summary>
-      <input id="serverUrl" type="text" placeholder="laisser vide = déduite (ex. https://api.printios.ma)" />
-    </details>
+    <!-- Adresse de l'API : jamais affichée, déduite automatiquement de l'espace
+         client (voir api.resolveServerForTenant). Champ caché conservé pour la
+         logique (rempli par la détection / l'installeur / le lien). -->
+    <input id="serverUrl" type="hidden" />
     <label>Identifiant</label>
-    <input id="logon" type="text" placeholder="Identifiant Packspace" />
+    <input id="logon" type="text" placeholder="Identifiant PrintIOS" />
     <label>Mot de passe</label>
     <input id="password" type="password" placeholder="Mot de passe" />
     <button id="loginBtn">Se connecter</button>
     <p id="loginError" class="error"></p>
-    <p class="hint">Utilisez un compte de l'agent créé dans Packspace → Synchronisation → « Comptes de l'agent ». Le mot de passe n'est jamais stocké : l'agent obtient un jeton dédié valable 1 an.</p>
+    <p class="hint">Utilisez un compte de l'agent créé dans PrintIOS → Synchronisation → « Comptes de l'agent ». Le mot de passe n'est jamais stocké : l'agent obtient un jeton dédié valable 1 an.</p>
   </section>
 
   <!-- ---------- Application ---------- -->

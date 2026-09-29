@@ -31,7 +31,7 @@ let tray = null
 let backend = null
 let lastAuthLost = false
 
-const autoLauncher = new AutoLaunch({ name: "PackSpace S3 Sync" })
+const autoLauncher = new AutoLaunch({ name: "PackSpace S3 Sync" }) // nom technique conservé (démarrage auto existant)
 
 function iconImage() {
   const iconPath = path.join(__dirname, "..", "build", "icon.png")
@@ -102,7 +102,7 @@ function buildTrayMenu() {
 
 function buildTray() {
   tray = new Tray(iconImage())
-  tray.setToolTip(`PackSpace S3 Sync v${api.APP_VERSION}`)
+  tray.setToolTip(`PrintIOS Sync v${api.APP_VERSION}`)
   buildTrayMenu()
   tray.on("click", () => createWindow())
 }
@@ -129,7 +129,7 @@ async function checkForUpdateAndNotify() {
   pendingUpdate = info?.available ? info : null
   buildTrayMenu()
   if (tray) {
-    tray.setToolTip(pendingUpdate ? `PackSpace S3 Sync v${api.APP_VERSION} — mise à jour v${pendingUpdate.version} disponible` : `PackSpace S3 Sync v${api.APP_VERSION}`)
+    tray.setToolTip(pendingUpdate ? `PrintIOS Sync v${api.APP_VERSION} — mise à jour v${pendingUpdate.version} disponible` : `PrintIOS Sync v${api.APP_VERSION}`)
   }
   if (!pendingUpdate || pendingUpdate.version === notifiedUpdateVersion) return
   notifiedUpdateVersion = pendingUpdate.version
@@ -139,7 +139,7 @@ async function checkForUpdateAndNotify() {
   }
   if (Notification.isSupported()) {
     const n = new Notification({
-      title: "PackSpace S3 Sync — mise à jour disponible",
+      title: "PrintIOS Sync — mise à jour disponible",
       body: `Version v${pendingUpdate.version} disponible (actuelle : v${pendingUpdate.current || "?"}). Cliquez pour mettre à jour.`,
       icon: iconImage(),
     })
@@ -172,7 +172,7 @@ function pushState(state) {
   }
   if (tray) {
     const active = (state.items || []).filter((i) => i.status === "downloading")
-    const prefix = backend && backend.kind === "service" ? "PackSpace S3 Sync (service)" : "PackSpace S3 Sync"
+    const prefix = backend && backend.kind === "service" ? "PrintIOS Sync (service)" : "PrintIOS Sync"
     if (active.length === 0) {
       tray.setToolTip(state.paused ? `${prefix} — en pause` : prefix)
     } else {

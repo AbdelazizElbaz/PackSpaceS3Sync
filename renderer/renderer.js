@@ -344,9 +344,9 @@ async function detectTenant() {
     if (seq !== detectSeq) return
     if (!$("serverUrl").value.trim()) $("serverUrl").value = r.serverUrl
     $("tenantName").textContent = r.name || r.tenant || tenantIn
-    $("tenantMeta").textContent = r.tenancy
-      ? `${r.tenant}${r.check?.type === "demo" ? " (démo)" : ""} · API ${r.serverUrl.replace(/^https?:\/\//, "").replace(/\/api$/, "")}`
-      : `API dédiée ${r.serverUrl.replace(/^https?:\/\//, "").replace(/\/api$/, "")}`
+    // L'adresse de l'API n'est JAMAIS affichée (demande explicite) : seul
+    // l'espace client (nom du magasin + identifiant) est montré.
+    $("tenantMeta").textContent = r.tenancy ? `${r.tenant}${r.check?.type === "demo" ? " (démo)" : ""}` : "espace dédié"
   } catch (e) {
     if (seq !== detectSeq) return
     card.classList.add("err")
@@ -391,7 +391,7 @@ $("pingBtn").addEventListener("click", async () => {
       }
     }
     out.className = ok ? "hint ok" : "hint err"
-    out.textContent = `${text} · API : ${r.serverUrl}`
+    out.textContent = text
   } catch (e) {
     out.className = "hint err"
     out.textContent = e?.message || "Échec du test."
@@ -559,7 +559,7 @@ $("settingsBtn").addEventListener("click", () => {
 $("serviceInstallBtn").addEventListener("click", async () => {
   if (
     !confirm(
-      "Installer PackSpace S3 Sync comme service de l'ordinateur ?\n\n" +
+      "Installer PrintIOS Sync comme service de l'ordinateur ?\n\n" +
         "• L'agent continuera à synchroniser même session fermée.\n" +
         "• Une élévation (administrateur) va être demandée.\n" +
         "• La configuration actuelle (connexion, instances, fichiers déjà synchronisés) est reprise par le service : rien n'est retéléchargé.\n" +
@@ -849,7 +849,7 @@ if (window.agent.onAuthPrefill) window.agent.onAuthPrefill((p) => {
 })
 window.agent.onAuthLost(async () => {
   await refreshConfig()
-  $("loginError").textContent = "Session terminée : ce poste a été supprimé depuis Packspace ou le jeton a expiré. Reconnectez-vous."
+  $("loginError").textContent = "Session terminée : ce poste a été supprimé depuis PrintIOS ou le jeton a expiré. Reconnectez-vous."
 })
 refreshConfig()
 window.agent.getState().then(render)

@@ -1,4 +1,4 @@
-# PackSpace S3 Sync
+# PrintIOS Sync (PackSpace S3 Sync)
 
 Agent desktop (Windows / macOS / Linux, Electron) qui tourne en arrière-plan
 (icône dans la zone de notification) et synchronise **automatiquement et en
@@ -126,10 +126,10 @@ Sur PrintIOS, **une seule API** (`https://api.printios.ma`) sert tous les
 clients ; l'espace client est transmis dans l'en-tête `X-Tenant` sur chaque
 appel (résolu côté API2 par `ResolveTenant` : slug, sous-domaine ou domaine
 propre). À la connexion, on saisit seulement l'**Espace client** — l'adresse de l'API
-est **déduite** (`api.resolveServerForTenant` : `api.<domaine parent>` pour
+n'est **jamais affichée** ; elle est **déduite** (`api.resolveServerForTenant` : `api.<domaine parent>` pour
 `packspace.printios.ma`, `api.<domaine>` pour un domaine propre, sinon l'API
 par défaut `https://api.printios.ma`, chaque candidate vérifiée par `/ping` +
-`/tenancy/host`) ; un champ « Avancé » permet de l'imposer. Le champ accepte
+`/tenancy/host`). Le champ accepte
 indifféremment :
 
 - le slug : `packspace` ;

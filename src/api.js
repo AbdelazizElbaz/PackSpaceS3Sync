@@ -176,7 +176,7 @@ async function ping(serverUrl, tenant = "") {
   // Ancien healthcheck d'API2 : {"message":"API OK"} sans `ok` ni
   // `desktop_api` → API Packspace reconnue, mais version à vérifier.
   const legacy = !data.ok && /API OK/i.test(String(data.message || ""))
-  if (!data.ok && !legacy) throw new Error("Réponse inattendue : ce n'est pas une API Packspace.")
+  if (!data.ok && !legacy) throw new Error("Réponse inattendue : ce n'est pas une API PrintIOS.")
   const out = { ok: true, desktop_api: 0, ...data, serverUrl: base, legacy }
   // API multi-client : l'espace est obligatoire, et on le vérifie tout de suite.
   if (data.tenancy) {
@@ -259,7 +259,7 @@ async function login(serverUrl, logon, password, tenant = "") {
     axios
       .post(`${base}/logout`, {}, { headers: { Authorization: `Bearer ${session.token}`, ...th }, timeout: 5000 })
       .catch(() => {})
-    throw new Error("Ce compte n'est pas autorisé : utilisez un compte de l'agent (Packspace → Synchronisation → « Comptes de l'agent »), un compte administrateur/opérateur, ou un compte vendeur (envoi de fichiers).")
+    throw new Error("Ce compte n'est pas autorisé : utilisez un compte de l'agent (PrintIOS → Synchronisation → « Comptes de l'agent »), un compte administrateur/opérateur, ou un compte vendeur (envoi de fichiers).")
   }
 
   // Vendeur : pas de jeton agent (réservé admin/opérateur côté API2), on
