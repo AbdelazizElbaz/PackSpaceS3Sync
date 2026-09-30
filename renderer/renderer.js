@@ -322,6 +322,7 @@ async function refreshConfig() {
   if (c.isLoggedIn) {
     $("loginView").classList.add("hidden")
     $("mainView").classList.remove("hidden")
+    $("logoutBtn").classList.remove("hidden")
     $("userLabel").textContent = `${c.userLabel || ""}${c.role ? ` (${c.role})` : ""} · ${c.agentLabel || c.hostname || ""}`
     // Selon le rôle (voir api.js) : synchro S3 (sync_agent/admin/opérateur)
     // et/ou envoi de fichiers sur les commandes (vendeur/admin/opérateur).
@@ -341,6 +342,7 @@ async function refreshConfig() {
   } else {
     $("loginView").classList.remove("hidden")
     $("mainView").classList.add("hidden")
+    $("logoutBtn").classList.add("hidden")
     $("userLabel").textContent = ""
     if (c.serverUrl) $("serverUrl").value = c.serverUrl
     if (c.tenant) $("tenant").value = c.tenant
@@ -449,9 +451,38 @@ $("loginBtn").addEventListener("click", async () => {
   }
 })
 
+// Déconnexion — disponible dans les deux modes (bouton de la barre du haut).
+// Mode agent : la synchro s'arrête (fichiers partiels conservés pour reprise),
+// le poste passe hors ligne dans PrintIOS. Mode utilisateur : les envois en
+// attente sont annulés (un autre compte pourra se connecter sur ce poste).
 $("logoutBtn").addEventListener("click", async () => {
-  await window.agent.logout()
+  const btn = $("logoutBtn")
+  const pending = uploadJobs.filter((j) => j.status === "queued" || j.status === "uploading").length
+  const lines = ["Se déconnecter de PrintIOS Sync ?"]
+  if (!$("syncHead").classList.contains("hidden")) lines.push("La synchronisation s'arrête et ce poste apparaîtra hors ligne dans PrintIOS.")
+  if (pending) lines.push(`${pending} envoi(s) de fichier en cours ou en attente seront annulés.`)
+  if (!window.confirm(lines.join("\n\n"))) return
+  btn.disabled = true
+  try {
+    await window.agent.logout()
+  } catch (e) {
+    // Même si l'API est injoignable, la session locale est effacée côté
+    // agent : on affiche quand même l'écran de connexion.
+    console.warn("logout", e)
+  } finally {
+    btn.disabled = false
+  }
+  // Remise à zéro de l'écran utilisateur (commande chargée, liste, envois).
+  uploadOrder = null
+  uploadJobs = []
+  $("uploadOrderId").value = ""
+  $("ordersList").innerHTML = ""
+  renderUploadOrder()
+  renderUploadQueue()
+  $("password").value = ""
   await refreshConfig()
+  $("loginError").textContent = ""
+  $("password").focus()
 })
 
 // ---------- explorateur : actions ----------

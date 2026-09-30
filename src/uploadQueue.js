@@ -24,6 +24,7 @@ class UploadQueue {
     this.log = log
     this.jobs = new Map()
     this.running = 0
+    this.suspended = false // true après une déconnexion, jusqu'à la reconnexion
     this.seq = Date.now()
     // Reprise des jobs non terminés du lancement précédent.
     for (const j of store.get("uploadQueue") || []) {
@@ -85,17 +86,44 @@ class UploadQueue {
     this.emit()
   }
 
+  // Déconnexion : on vide la file (envois en attente, en erreur ou terminés)
+  // et on la suspend. Un envoi déjà en cours ne peut pas être interrompu
+  // proprement : il est marqué « annulé » et son résultat sera ignoré.
+  cancelAll() {
+    this.suspended = true
+    for (const [id, j] of this.jobs) {
+      if (j.status === "uploading") j.cancelled = true
+      else this.jobs.delete(id)
+    }
+    this.emit()
+  }
+
+  // Reconnexion : la file reprend (nouveaux envois du compte connecté).
+  resume() {
+    this.suspended = false
+    this.pump()
+  }
+
   trimDone() {
     const done = this.list().filter((j) => j.status === "done")
     for (const j of done.slice(KEEP_DONE)) this.jobs.delete(j.id)
   }
 
   pump() {
-    while (this.running < MAX_PARALLEL) {
+    while (!this.suspended && this.running < MAX_PARALLEL) {
       const next = this.list().reverse().find((j) => j.status === "queued")
       if (!next) break
       this.run(next)
     }
+  }
+
+  // Job annulé par une déconnexion pendant l'envoi : retiré de la liste.
+  dropIfCancelled(job) {
+    if (!job.cancelled) return false
+    this.jobs.delete(job.id)
+    this.running--
+    this.emit()
+    return true
   }
 
   async run(job) {
@@ -115,9 +143,11 @@ class UploadQueue {
           this.emit()
         },
       })
+      if (this.dropIfCancelled(job)) return
       job.status = "done"; job.bytes = job.size; job.speed = 0; job.finishedAt = Date.now(); job.result = { name: out.name }
       this.log("info", `Fichier ${job.kind === "design" ? "de conception" : "de montage"} envoyé : commande ${job.orderId}, article ${job.itemId}, ${job.name}`)
     } catch (err) {
+      if (this.dropIfCancelled(job)) return
       const status = err?.response?.status
       const message = err?.response?.data?.message || err?.message || "Échec de l'envoi"
       const retryable = !status || status >= 500 || status === 408 || status === 429

@@ -12,6 +12,9 @@
       <span id="modeBadge" class="mode-badge hidden" title="L'agent tourne comme service : il continue même session fermée">service</span>
       <span id="globalStatus" class="global-status"></span>
       <span id="userLabel" class="user-label"></span>
+      <!-- Déconnexion : dans la barre du haut pour être accessible dans les
+           deux modes (agent de synchro et utilisateur). -->
+      <button id="logoutBtn" class="small danger hidden" type="button" title="Se déconnecter de cet espace">Se déconnecter</button>
     </span>
   </header>
 
@@ -111,7 +114,6 @@
           <button id="scanNowBtn" class="small">Vérifier maintenant</button>
           <button id="pauseBtn" class="small">Pause</button>
           <button id="settingsBtn" class="small">Réglages</button>
-          <button id="logoutBtn" class="small danger">Déconnexion</button>
         </span>
       </div>
 

@@ -241,7 +241,9 @@ class Engine {
   async logout() {
     // Arrêt propre des téléchargements (fichiers partiels conservés pour
     // reprise) AVANT de révoquer la session ; les manifestes restent.
-    await this.sync.stop()
+    // Mode utilisateur : aucune synchro active, stop() est sans effet. Une
+    // erreur ici ne doit pas empêcher d'effacer la session locale.
+    try { await this.sync.stop() } catch (err) { this.log("warn", `Arrêt de la synchro : ${err?.message || err}`) }
     this.sync.registered = false
     await api.agentOffline()
     store.set("token", "")

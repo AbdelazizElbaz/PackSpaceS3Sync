@@ -483,6 +483,7 @@ ipcMain.handle("config:setAutoLaunch", async (_e, enabled) => {
 ipcMain.handle("auth:login", wrap(async (_e, payload) => {
   const out = await backend.call("login", [payload], 90000)
   lastAuthLost = false
+  if (uploadQueue) uploadQueue.resume()
   // Vérification de version (notification système + tray) dès la connexion.
   setTimeout(checkForUpdateAndNotify, 3000)
   return out
@@ -503,7 +504,16 @@ ipcMain.handle("auth:ping", async (_e, serverUrl, tenant = "") => {
   }
 })
 
-ipcMain.handle("auth:logout", wrap(() => backend.call("logout")))
+ipcMain.handle("auth:logout", wrap(async () => {
+  // File d'envoi (mode utilisateur) : suspendue et vidée AVANT de révoquer le
+  // jeton, sinon les envois suivants partiraient avec une session effacée.
+  if (uploadQueue) uploadQueue.cancelAll()
+  try {
+    return await backend.call("logout")
+  } finally {
+    lastAuthLost = false
+  }
+}))
 
 ipcMain.handle("s3:browse", wrap((_e, prefix) => backend.call("browse", [prefix || ""])))
 
