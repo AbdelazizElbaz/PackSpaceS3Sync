@@ -322,6 +322,7 @@ async function refreshConfig() {
   if (c.isLoggedIn) {
     $("loginView").classList.add("hidden")
     $("mainView").classList.remove("hidden")
+    $("logoutBtn").classList.remove("hidden")
     $("userLabel").textContent = `${c.userLabel || ""}${c.role ? ` (${c.role})` : ""} · ${c.agentLabel || c.hostname || ""}`
     // Selon le rôle (voir api.js) : synchro S3 (sync_agent/admin/opérateur)
     // et/ou envoi de fichiers sur les commandes (vendeur/admin/opérateur).
@@ -331,6 +332,8 @@ async function refreshConfig() {
     $("syncHead").classList.toggle("hidden", !canSync)
     $("syncBody").classList.toggle("hidden", !canSync)
     $("uploadPanel").classList.toggle("hidden", !canUpload)
+    $("ordersPane").classList.toggle("hidden", !canUpload)
+    if (canUpload) loadOrdersList()
     $("autoLaunchToggle").checked = !!c.autoLaunch
     $("autoUpdateToggle").checked = Number(c.autoUpdate) === 1
     for (const k of SETTINGS) $(k).value = c[k]
@@ -339,6 +342,7 @@ async function refreshConfig() {
   } else {
     $("loginView").classList.remove("hidden")
     $("mainView").classList.add("hidden")
+    $("logoutBtn").classList.add("hidden")
     $("userLabel").textContent = ""
     if (c.serverUrl) $("serverUrl").value = c.serverUrl
     if (c.tenant) $("tenant").value = c.tenant
@@ -447,9 +451,38 @@ $("loginBtn").addEventListener("click", async () => {
   }
 })
 
+// Déconnexion — disponible dans les deux modes (bouton de la barre du haut).
+// Mode agent : la synchro s'arrête (fichiers partiels conservés pour reprise),
+// le poste passe hors ligne dans PrintIOS. Mode utilisateur : les envois en
+// attente sont annulés (un autre compte pourra se connecter sur ce poste).
 $("logoutBtn").addEventListener("click", async () => {
-  await window.agent.logout()
+  const btn = $("logoutBtn")
+  const pending = uploadJobs.filter((j) => j.status === "queued" || j.status === "uploading").length
+  const lines = ["Se déconnecter de PrintIOS Sync ?"]
+  if (!$("syncHead").classList.contains("hidden")) lines.push("La synchronisation s'arrête et ce poste apparaîtra hors ligne dans PrintIOS.")
+  if (pending) lines.push(`${pending} envoi(s) de fichier en cours ou en attente seront annulés.`)
+  if (!window.confirm(lines.join("\n\n"))) return
+  btn.disabled = true
+  try {
+    await window.agent.logout()
+  } catch (e) {
+    // Même si l'API est injoignable, la session locale est effacée côté
+    // agent : on affiche quand même l'écran de connexion.
+    console.warn("logout", e)
+  } finally {
+    btn.disabled = false
+  }
+  // Remise à zéro de l'écran utilisateur (commande chargée, liste, envois).
+  uploadOrder = null
+  uploadJobs = []
+  $("uploadOrderId").value = ""
+  $("ordersList").innerHTML = ""
+  renderUploadOrder()
+  renderUploadQueue()
+  $("password").value = ""
   await refreshConfig()
+  $("loginError").textContent = ""
+  $("password").focus()
 })
 
 // ---------- explorateur : actions ----------
@@ -665,9 +698,9 @@ let updateInfo = null
 let dismissedUpdateVersion = null
 
 let lastUpdateCheckAt = 0
-async function refreshUpdateBanner() {
+async function refreshUpdateBanner(force = false) {
   try {
-    updateInfo = await window.agent.checkUpdate()
+    updateInfo = await window.agent.checkUpdate(force)
   } catch {
     updateInfo = null
   }
@@ -711,7 +744,10 @@ $("updateApplyBtn").addEventListener("click", async () => {
   }
 })
 
-setInterval(refreshUpdateBanner, 2 * 60 * 60 * 1000)
+// Nouvelle version affichée au plus vite : toutes les 10 min, et dès que la
+// fenêtre revient au premier plan (au plus une fois par minute).
+setInterval(() => refreshUpdateBanner(), 10 * 60 * 1000)
+window.addEventListener("focus", () => { if (Date.now() - lastUpdateCheckAt > 60 * 1000) refreshUpdateBanner() })
 // Tant qu'aucune vérification n'a abouti (pas connecté au démarrage,
 // réseau…), on réessaie toutes les 5 min plutôt que d'attendre 2 h.
 setInterval(() => {
@@ -742,12 +778,45 @@ function renderUpdateCheckStatus() {
   }[updateInfo.reason] || "à jour"
   el.textContent = `Version installée : ${cur} — ${why}.`
 }
+// Recherche MANUELLE (bouton de la barre du haut, menu de l'icône) : on
+// affiche toujours un résultat — nouvelle version (avec « Mettre à jour
+// maintenant ») ou « à jour » / raison, dans la bannière du haut.
+let manualCheckTimer = null
+async function manualUpdateCheck() {
+  const btn = $("topCheckUpdateBtn")
+  if (btn) { btn.disabled = true; btn.textContent = "Recherche…" }
+  clearTimeout(manualCheckTimer)
+  try {
+    dismissedUpdateVersion = null
+    await refreshUpdateBanner(true)
+    const banner = $("updateBanner")
+    if (updateInfo?.available) {
+      $("updateApplyBtn").classList.remove("hidden")
+      $("updateApplyBtn").disabled = false
+      $("updateApplyBtn").textContent = "Mettre à jour maintenant"
+      $("updateDismissBtn").classList.remove("hidden")
+      banner.classList.remove("hidden")
+    } else {
+      renderUpdateCheckStatus()
+      $("updateBannerText").textContent = $("updateCheckStatus")?.textContent || "Aucune mise à jour disponible."
+      $("updateApplyBtn").classList.add("hidden")
+      $("updateDismissBtn").classList.remove("hidden")
+      banner.classList.remove("hidden")
+      manualCheckTimer = setTimeout(() => { if (!updateInfo?.available) banner.classList.add("hidden") }, 8000)
+    }
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = "Rechercher une mise à jour" }
+  }
+}
+$("topCheckUpdateBtn")?.addEventListener("click", manualUpdateCheck)
+window.agent.onManualUpdateCheck?.(() => manualUpdateCheck())
+
 $("checkUpdateBtn")?.addEventListener("click", async () => {
   const btn = $("checkUpdateBtn")
   btn.disabled = true
   btn.textContent = "Vérification…"
   try {
-    await refreshUpdateBanner()
+    await refreshUpdateBanner(true)
   } finally {
     btn.disabled = false
     btn.textContent = "Vérifier maintenant"
@@ -802,13 +871,13 @@ function renderUploadOrder() {
   const box = $("uploadOrder")
   if (!uploadOrder) { box.innerHTML = ""; return }
   const o = uploadOrder
-  const meta = `<div class="order-meta">Commande <strong>#${o.id}</strong> · ${o.stat || ""}${o.reseller ? ` · ${o.reseller}` : ""}${o.date ? ` · ${String(o.date).slice(0, 10)}` : ""}${o.print_file ? ` · Fichier commande : <a href="#" data-open="${encodeURIComponent(o.print_file_key || "")}">${o.print_file}</a>` : ""}</div>`
+  const meta = `<div class="order-meta">Commande <strong>#${o.id}</strong> · ${o.stat || ""}${o.reseller ? ` · ${o.reseller}` : ""}${o.date ? ` · ${String(o.date).slice(0, 10)}` : ""}${o.print_file ? ` · Fichier commande : <a href="#" data-open="${encodeURIComponent(o.print_file_key || "")}" data-name="${encodeURIComponent(o.print_file)}">${o.print_file}</a>` : ""}</div>`
   const items = (o.items || []).map((it) => `<div class="upload-item" data-item="${it.id}">
       <div>
         <div class="item-name">${it.name}${it.quantity ? ` ×${it.quantity}` : ""}</div>
         <div class="item-files">
-          <span>Conception : ${it.design_file ? `<a href="#" data-open="${encodeURIComponent(it.design_file_key || "")}">${it.design_file}</a>` : "—"}</span>
-          <span>Montage / impression : ${it.print_file ? `<a href="#" data-open="${encodeURIComponent(it.print_file_key || "")}">${it.print_file}</a>` : "—"}</span>
+          <span>Conception : ${it.design_file ? `<a href="#" data-open="${encodeURIComponent(it.design_file_key || "")}" data-name="${encodeURIComponent(it.design_file)}">${it.design_file}</a>` : "—"}</span>
+          <span>Montage / impression : ${it.print_file ? `<a href="#" data-open="${encodeURIComponent(it.print_file_key || "")}" data-name="${encodeURIComponent(it.print_file)}">${it.print_file}</a>` : "—"}</span>
         </div>
       </div>
       <button class="small" data-upload="design" data-item="${it.id}">Fichier de conception…</button>
@@ -823,7 +892,8 @@ function renderUploadOrder() {
     e.preventDefault()
     const key = decodeURIComponent(a.dataset.open || "")
     if (!key) return
-    try { await window.agent.openItemFile(key) } catch (err) { $("uploadError").textContent = errMsg(err, "Impossible d'ouvrir le fichier.") }
+    const name = decodeURIComponent(a.dataset.name || "")
+    try { await window.agent.openItemFile(key, name) } catch (err) { $("uploadError").textContent = errMsg(err, "Impossible d'ouvrir le fichier.") }
   }))
 }
 
@@ -880,6 +950,33 @@ async function startUpload(itemId, kind) {
     $("uploadError").textContent = errMsg(e, "Impossible d'ajouter l'envoi.")
   }
 }
+
+// Liste des commandes PAS ENCORE EXPÉDIÉES (colonne gauche, mode utilisateur) :
+// un clic charge la commande dans le panneau de droite. Rafraîchie toutes les 60 s.
+let ordersSearchTimer = null
+async function loadOrdersList() {
+  const box = $("ordersList")
+  const err = $("ordersError")
+  err.textContent = ""
+  try {
+    const list = await window.agent.listOrders({ search: $("ordersSearch").value.trim() })
+    if (!list.length) { box.innerHTML = `<p class="empty">Aucune commande à expédier.</p>`; return }
+    box.innerHTML = list.map((o) => `<div class="browse-row order-row ${uploadOrder && Number(uploadOrder.id) === Number(o.id) ? "active" : ""}" data-order="${o.id}">
+        <div class="order-row-main"><strong>#${o.id}</strong> ${o.customer ? `· ${o.customer}` : ""}${o.reseller ? ` <span class="hint">· ${o.reseller}</span>` : ""}</div>
+        <div class="hint">${o.stat || ""}${o.date ? ` · ${String(o.date).slice(0, 10)}` : ""}${o.items_count != null ? ` · ${o.items_count} article(s)` : ""}${o.has_shipping ? " · colis créé" : ""}</div>
+      </div>`).join("")
+    box.querySelectorAll("[data-order]").forEach((el) => el.addEventListener("click", () => {
+      $("uploadOrderId").value = el.dataset.order
+      loadUploadOrder()
+      box.querySelectorAll(".order-row").forEach((r) => r.classList.toggle("active", r === el))
+    }))
+  } catch (e) {
+    err.textContent = errMsg(e, "Impossible de charger les commandes.")
+  }
+}
+$("refreshOrdersBtn").addEventListener("click", loadOrdersList)
+$("ordersSearch").addEventListener("input", () => { clearTimeout(ordersSearchTimer); ordersSearchTimer = setTimeout(loadOrdersList, 400) })
+setInterval(() => { if (!$("ordersPane").classList.contains("hidden")) loadOrdersList() }, 60 * 1000)
 
 $("uploadLoadBtn").addEventListener("click", loadUploadOrder)
 $("uploadOrderId").addEventListener("keydown", (e) => { if (e.key === "Enter") loadUploadOrder() })

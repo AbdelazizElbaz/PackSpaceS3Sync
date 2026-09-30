@@ -1,3 +1,8 @@
+/* ---------- liste des commandes (mode utilisateur) ---------- */
+.order-row { display: block; padding: 8px 10px; cursor: pointer; border-bottom: 1px solid var(--border, #2a2f3a); }
+.order-row:hover, .order-row.active { background: color-mix(in srgb, var(--accent, #2f6394) 18%, transparent); }
+.order-row-main { font-size: 13px; }
+
 /* ---------- file d'envoi ---------- */
 .upload-queue { display: grid; gap: 4px; max-height: 220px; overflow: auto; }
 .queue-row { display: grid; grid-template-columns: 1fr auto auto; gap: 6px 10px; align-items: center; padding: 6px 10px; border: 1px solid var(--border, #2a2f3a); border-radius: 6px; font-size: 12px; }
@@ -33,7 +38,14 @@ details.advanced input { margin-top: 6px; }
 html, body { height: 100%; }
 body { margin: 0; font-family: -apple-system, "Segoe UI", Roboto, Arial, sans-serif; background: #f7f8fa; color: #1f2937; font-size: 13px; display: flex; flex-direction: column; }
 .topbar { display: flex; align-items: center; justify-content: space-between; padding: 10px 16px; background: #2f6394; color: #fff; flex: 0 0 auto; }
-.brand { font-weight: 600; }
+.brand { font-weight: 600; display: inline-flex; align-items: center; gap: 8px; }
+/* Logo PrintIOS — voir index.html */
+.brand-logo { display: inline-flex; align-items: baseline; background: #fff; border-radius: 8px; padding: 3px 10px; font-size: 16px; font-weight: 800; letter-spacing: -0.02em; line-height: 1.2; direction: ltr; }
+.brand-logo .bl-print { color: #2547e9; }
+.brand-logo .bl-i { color: #f5b301; }
+.brand-logo .bl-o { background-image: linear-gradient(90deg, #f5b301 50%, #e11d2e 50%); -webkit-background-clip: text; background-clip: text; color: transparent; }
+.brand-logo .bl-s { color: #e11d2e; }
+.brand-logo .bl-sync { color: #475569; font-weight: 600; font-size: 13px; margin-left: 6px; letter-spacing: 0; }
 .topbar-right { display: flex; gap: 14px; align-items: center; font-size: 12px; }
 .global-status { opacity: .9; }
 .user-label { opacity: .85; }

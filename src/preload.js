@@ -15,7 +15,8 @@ contextBridge.exposeInMainWorld("agent", {
   // Envoi de fichiers (conception / montage) sur une commande
   pickUploadFile: (opts) => ipcRenderer.invoke("upload:pickFile", opts || {}),
   getOrder: (orderId) => ipcRenderer.invoke("upload:getOrder", orderId),
-  openItemFile: (s3Key) => ipcRenderer.invoke("upload:openFile", s3Key),
+  listOrders: (opts) => ipcRenderer.invoke("upload:listOrders", opts || {}),
+  openItemFile: (s3Key, displayName) => ipcRenderer.invoke("upload:openFile", s3Key, displayName || null),
   // File d'envoi (plusieurs fichiers en même temps, arrière-plan)
   enqueueUpload: (payload) => ipcRenderer.invoke("upload:enqueue", payload),
   uploadQueue: () => ipcRenderer.invoke("upload:queue"),
@@ -49,7 +50,10 @@ contextBridge.exposeInMainWorld("agent", {
   serviceStart: () => ipcRenderer.invoke("service:start"),
 
   // Mise à jour de l'agent (voir selfUpdater.js)
-  checkUpdate: () => ipcRenderer.invoke("update:check"),
+  checkUpdate: (force = false) => ipcRenderer.invoke("update:check", !!force),
+  // Menu de l'icône → « Rechercher une mise à jour » : la fenêtre lance la
+  // recherche et affiche le résultat.
+  onManualUpdateCheck: (cb) => ipcRenderer.on("update:manualCheck", () => cb()),
   applyUpdate: () => ipcRenderer.invoke("update:apply"),
 
   // Pré-remplissage de la connexion (lien printios-sync:// depuis le navigateur)

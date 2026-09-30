@@ -7,11 +7,24 @@
 </head>
 <body>
   <header class="topbar">
-    <span class="brand">PrintIOS Sync <span id="appVersion" class="app-version" title="Version installée"></span></span>
+    <!-- Logo PrintIOS (mêmes couleurs que la boutique et l'application) :
+         « Print » bleu, « I » + moitié gauche du « O » jaune, moitié droite
+         du « O » + « S » rouge. Pastille blanche pour rester lisible sur la
+         barre bleue. -->
+    <span class="brand">
+      <span class="brand-logo" aria-label="PrintIOS Sync"><span class="bl-print">Print</span><span class="bl-i">I</span><span class="bl-o">O</span><span class="bl-s">S</span><span class="bl-sync">Sync</span></span>
+      <span id="appVersion" class="app-version" title="Version installée"></span>
+    </span>
     <span class="topbar-right">
       <span id="modeBadge" class="mode-badge hidden" title="L'agent tourne comme service : il continue même session fermée">service</span>
       <span id="globalStatus" class="global-status"></span>
       <span id="userLabel" class="user-label"></span>
+      <!-- Recherche manuelle de mise à jour — visible dans les deux modes
+           (et avant connexion). -->
+      <button id="topCheckUpdateBtn" class="small ghost" type="button" title="Rechercher une nouvelle version de PrintIOS Sync">Rechercher une mise à jour</button>
+      <!-- Déconnexion : dans la barre du haut pour être accessible dans les
+           deux modes (agent de synchro et utilisateur). -->
+      <button id="logoutBtn" class="small danger hidden" type="button" title="Se déconnecter de cet espace">Se déconnecter</button>
     </span>
   </header>
 
@@ -55,6 +68,19 @@
 
   <!-- ---------- Application ---------- -->
   <section id="mainView" class="view main hidden">
+    <!-- Colonne gauche (mode utilisateur) : commandes pas encore expédiées -->
+    <aside id="ordersPane" class="pane explorer hidden">
+      <div class="pane-head">
+        <strong>Commandes à expédier</strong>
+        <button id="refreshOrdersBtn" class="icon" title="Actualiser">↻</button>
+      </div>
+      <div class="dir-row" style="padding:6px 10px">
+        <input id="ordersSearch" type="text" placeholder="N° ou client…" />
+      </div>
+      <div id="ordersError" class="error"></div>
+      <div id="ordersList" class="browse-list"><p class="empty">Chargement…</p></div>
+    </aside>
+
     <!-- Colonne gauche : explorateur S3 -->
     <aside id="explorerPane" class="pane explorer">
       <div class="pane-head">
@@ -98,7 +124,6 @@
           <button id="scanNowBtn" class="small">Vérifier maintenant</button>
           <button id="pauseBtn" class="small">Pause</button>
           <button id="settingsBtn" class="small">Réglages</button>
-          <button id="logoutBtn" class="small danger">Déconnexion</button>
         </span>
       </div>
 

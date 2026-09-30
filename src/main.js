@@ -77,7 +77,8 @@ function buildTrayMenu() {
   if (!tray) return
   const items = [
     { label: "Ouvrir", click: () => createWindow() },
-    { label: "Vérifier maintenant", click: () => backend && backend.call("scanNow").catch(() => {}) },
+    { label: "Vérifier les dossiers maintenant", click: () => backend && backend.call("scanNow").catch(() => {}) },
+    { label: "Rechercher une mise à jour", click: () => manualUpdateCheckFromTray() },
   ]
   if (pendingUpdate?.available) {
     items.push({ type: "separator" })
@@ -115,7 +116,11 @@ function buildTray() {
 // (une seule fois par version), ajoute une entrée au menu tray et change
 // l'info-bulle. Un clic sur la notification ouvre la fenêtre sur la
 // bannière de mise à jour.
-const UPDATE_CHECK_MS = 2 * 60 * 60 * 1000
+// Toutes les 10 min (et à l'ouverture de la fenêtre) : une nouvelle version
+// publiée doit apparaître tout de suite — sur demande : « la mise à jour doit
+// s'afficher immédiatement ». Appel léger (manifeste en cache 60 s côté API,
+// limité par poste).
+const UPDATE_CHECK_MS = 10 * 60 * 1000
 let notifiedUpdateVersion = null
 
 async function checkForUpdateAndNotify() {
@@ -151,9 +156,20 @@ async function checkForUpdateAndNotify() {
   }
 }
 
+// Menu de l'icône → « Rechercher une mise à jour » : ouvre la fenêtre, qui
+// lance la recherche et affiche le résultat (nouvelle version ou « à jour »).
+function manualUpdateCheckFromTray() {
+  createWindow()
+  const send = () => { if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send("update:manualCheck") }
+  if (mainWindow && mainWindow.webContents.isLoading()) mainWindow.webContents.once("did-finish-load", send)
+  else send()
+  // Met aussi à jour le menu / l'info-bulle de l'icône.
+  checkForUpdateAndNotify()
+}
+
 function scheduleUpdateNotifications() {
-  // Premier contrôle 30 s après le démarrage (laisse le backend se connecter).
-  setTimeout(checkForUpdateAndNotify, 30 * 1000)
+  // Premier contrôle 5 s après le démarrage (laisse le backend se connecter).
+  setTimeout(checkForUpdateAndNotify, 5 * 1000)
   setInterval(checkForUpdateAndNotify, UPDATE_CHECK_MS)
 }
 
@@ -467,8 +483,9 @@ ipcMain.handle("upload:retry", async (_e, id) => { getUploadQueue().retry(id); r
 ipcMain.handle("upload:remove", async (_e, id) => { getUploadQueue().remove(id); return true })
 ipcMain.handle("upload:clearDone", async () => { getUploadQueue().clearDone(); return true })
 ipcMain.handle("upload:getOrder", wrap(async (_e, orderId) => api.getOrder(orderId)))
+ipcMain.handle("upload:listOrders", wrap(async (_e, opts) => api.listUnshippedOrders(opts || {})))
 // Ouvre un fichier d'article (URL S3 présignée) dans le navigateur par défaut.
-ipcMain.handle("upload:openFile", wrap(async (_e, s3Key) => { const url = await api.fileUrl(s3Key); await shell.openExternal(url); return true }))
+ipcMain.handle("upload:openFile", wrap(async (_e, s3Key, displayName = null) => { const url = await api.fileUrl(s3Key, displayName); await shell.openExternal(url); return true }))
 // Compatibilité : envoi direct (sans file) — conservé pour le mode web.
 ipcMain.handle("upload:start", wrap(async (_e, payload) => getUploadQueue().enqueue(payload)))
 
@@ -482,6 +499,7 @@ ipcMain.handle("config:setAutoLaunch", async (_e, enabled) => {
 ipcMain.handle("auth:login", wrap(async (_e, payload) => {
   const out = await backend.call("login", [payload], 90000)
   lastAuthLost = false
+  if (uploadQueue) uploadQueue.resume()
   // Vérification de version (notification système + tray) dès la connexion.
   setTimeout(checkForUpdateAndNotify, 3000)
   return out
@@ -502,7 +520,16 @@ ipcMain.handle("auth:ping", async (_e, serverUrl, tenant = "") => {
   }
 })
 
-ipcMain.handle("auth:logout", wrap(() => backend.call("logout")))
+ipcMain.handle("auth:logout", wrap(async () => {
+  // File d'envoi (mode utilisateur) : suspendue et vidée AVANT de révoquer le
+  // jeton, sinon les envois suivants partiraient avec une session effacée.
+  if (uploadQueue) uploadQueue.cancelAll()
+  try {
+    return await backend.call("logout")
+  } finally {
+    lastAuthLost = false
+  }
+}))
 
 ipcMain.handle("s3:browse", wrap((_e, prefix) => backend.call("browse", [prefix || ""])))
 
@@ -528,7 +555,7 @@ ipcMain.handle("sync:resume", wrap(() => backend.call("resume")))
 // c'est CE processus Electron qui se ferme juste après avoir lancé
 // l'assistant d'installation (voir selfUpdater.js). Le timeout est élevé :
 // le téléchargement de l'installeur peut prendre plus d'une minute.
-ipcMain.handle("update:check", wrap(() => backend.call("checkUpdate")))
+ipcMain.handle("update:check", wrap((_e, force = false) => backend.call("checkUpdate", [!!force], 30000)))
 ipcMain.handle("update:apply", wrap(() => backend.call("applyUpdate", [], 180000)))
 
 // ---------- mode service ----------

@@ -240,7 +240,10 @@ async function login(serverUrl, logon, password, tenant = "") {
   try {
     res = await axios.post(
       `${base}/login`,
-      { logon, password },
+      // client=desktop : session propre à Sync (jeton 'desktop-app' côté
+      // API2) — ne déconnecte pas le même compte dans le B2B web, et une
+      // connexion au B2B ne déconnecte plus Sync (AuthController::store).
+      { logon, password, client: "desktop" },
       { headers: { Accept: "application/json", ...th }, timeout: 15000 }
     )
   } catch (err) {
@@ -318,10 +321,34 @@ async function getOrder(orderId) {
   }
 }
 
+// Commandes PAS ENCORE EXPÉDIÉES de l'utilisateur (mode utilisateur) —
+// GET /orders/unshipped, même endpoint que l'onglet « À expédier » du B2B.
+// Vendeur / revendeur : limité à son revendeur (reseller_user_id, comme le
+// front) ; admin / opérateur : toutes. `search` = n° commande / client.
+async function listUnshippedOrders({ search = "", limit = 100 } = {}) {
+  const role = store.get("role") || ""
+  const params = { search: search || undefined }
+  if (["vendeur", "reseller"].includes(role) && store.get("userId")) params.reseller_user_id = store.get("userId")
+  const res = await client().get("/orders/unshipped", { params })
+  const list = Array.isArray(res.data) ? res.data : (res.data?.data || [])
+  return list.slice(0, limit).map((o) => ({
+    id: o.id,
+    stat: o.stat,
+    date: o.date || o.created_at,
+    reseller: `${o.reseller?.user?.first_name || ""} ${o.reseller?.user?.last_name || ""}`.trim(),
+    customer: o.shippingaddress?.customer_name || o.client?.full_name || o.customer_name || "",
+    items_count: Array.isArray(o.items) ? o.items.length : (o.items_count ?? null),
+    total: o.total_order,
+    has_shipping: !!o.has_shipping,
+  }))
+}
+
 // URL présignée (15 min) pour OUVRIR un fichier d'article dans le navigateur
 // (POST /s3file/presignDownload, même endpoint que la synchro).
-async function fileUrl(s3Key) {
-  return presignDownload(s3Key)
+async function fileUrl(s3Key, displayName = null) {
+  const res = await client().post("/s3file/presignDownload", { filename: s3Key, expires: 20, download_name: displayName || undefined })
+  if (!res.data?.url) throw new Error("Pas d'URL présignée renvoyée")
+  return res.data.url
 }
 
 // md5 hexadécimal d'un fichier (flux, sans le charger en mémoire).
@@ -543,7 +570,9 @@ async function deleteInstance(id) {
 // DesktopSyncController::releases()) — même endpoint que la carte de
 // téléchargement du B2B ; l'agent y a accès avec son propre jeton (rôle
 // admin/operator). { available, version, assets:[{os,arch,kind,name,size,url}] }
-async function fetchLatestRelease() {
+// refresh=true : recherche manuelle — l'API relit la dernière version
+// publiée sans attendre son cache (60 s).
+async function fetchLatestRelease({ refresh = false } = {}) {
   // Endpoint PUBLIC (GET /desktop/agent/release) : la mise à jour doit
   // fonctionner même déconnecté (écran de connexion, jeton expiré) — seule
   // l'adresse du serveur (et l'espace client) est nécessaire. Repli sur
@@ -551,6 +580,7 @@ async function fetchLatestRelease() {
   const base = normalizeServerUrl(store.get("serverUrl"))
   try {
     const res = await axios.get(`${base}/desktop/agent/release`, {
+      params: refresh ? { refresh: 1 } : undefined,
       // X-Agent-Id : limite de débit PAR POSTE côté API (et non par IP du magasin)
       headers: { Accept: "application/json", "X-Agent-Id": machineId(), "X-Agent-Host": HOSTNAME, ...tenantHeaders() },
       timeout: 15000,
@@ -584,6 +614,7 @@ module.exports = {
   ping,
   login,
   getOrder,
+  listUnshippedOrders,
   fileUrl,
   uploadItemFile,
   declareLocalCopy,

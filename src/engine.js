@@ -140,13 +140,13 @@ class Engine {
   // asset=null si aucun installeur pour cette plateforme (ou aucune
   // release publiée). Ne throw jamais : un souci réseau => juste
   // "non disponible", pas d'erreur qui interromprait l'appelant.
-  async checkUpdate() {
+  async checkUpdate(force = false) {
     // Sans jeton aussi (écran de connexion) : l'endpoint de version est public.
     if (!store.get("serverUrl")) {
       return { available: false, current: api.APP_VERSION, reason: "no_server" }
     }
     try {
-      const rel = await api.fetchLatestRelease()
+      const rel = await api.fetchLatestRelease({ refresh: !!force })
       if (!rel?.available || !rel.version) {
         return { available: false, current: api.APP_VERSION, reason: "no_release", message: rel?.message || null }
       }
@@ -195,6 +195,7 @@ class Engine {
     store.set("tenant", api.normalizeTenant(tenant))
     store.set("token", data.token)
     store.set("role", data.role || "")
+    store.set("userId", data.id || null)
     store.set("userLabel", `${data.first_name || ""} ${data.last_name || ""}`.trim() || data.logon)
     this.sync.registered = false
     if (this.canSync()) {
@@ -214,8 +215,12 @@ class Engine {
     return api.getOrder(orderId)
   }
 
-  fileUrl(s3Key) {
-    return api.fileUrl(s3Key)
+  fileUrl(s3Key, displayName = null) {
+    return api.fileUrl(s3Key, displayName)
+  }
+
+  listUnshippedOrders(opts) {
+    return api.listUnshippedOrders(opts || {})
   }
 
   // Progression poussée via les listeners d'état (clé uploadProgress) pour
@@ -236,7 +241,9 @@ class Engine {
   async logout() {
     // Arrêt propre des téléchargements (fichiers partiels conservés pour
     // reprise) AVANT de révoquer la session ; les manifestes restent.
-    await this.sync.stop()
+    // Mode utilisateur : aucune synchro active, stop() est sans effet. Une
+    // erreur ici ne doit pas empêcher d'effacer la session locale.
+    try { await this.sync.stop() } catch (err) { this.log("warn", `Arrêt de la synchro : ${err?.message || err}`) }
     this.sync.registered = false
     await api.agentOffline()
     store.set("token", "")
@@ -308,6 +315,7 @@ Engine.METHODS = [
   "resolveTenant",
   "getOrder",
   "fileUrl",
+  "listUnshippedOrders",
   "uploadItemFile",
   "logout",
   "browse",

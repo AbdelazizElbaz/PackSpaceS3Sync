@@ -95,7 +95,8 @@
     // fonction réservée à l'application de bureau.
     pickUploadFile: async () => { window.alert("L'envoi de fichiers n'est disponible que dans l'application de bureau."); return null },
     getOrder: (orderId) => rpc("getOrder", [orderId]),
-    openItemFile: async (s3Key) => { const url = await rpc("fileUrl", [s3Key]); window.open(url, "_blank"); return true },
+    listOrders: (opts) => rpc("listUnshippedOrders", [opts || {}]),
+    openItemFile: async (s3Key, displayName) => { const url = await rpc("fileUrl", [s3Key, displayName || null]); window.open(url, "_blank"); return true },
     enqueueUpload: (payload) => rpc("uploadItemFile", [payload]),
     uploadQueue: async () => [],
     retryUpload: async () => false,
@@ -117,7 +118,7 @@
     // silencieuse elle-même refuse proprement en conteneur (voir
     // selfUpdater.js isContainer()) : ici la mise à jour se fait en
     // changeant le tag d'image Docker, pas depuis cette page.
-    checkUpdate: () => rpc("checkUpdate"),
+    checkUpdate: (force = false) => rpc("checkUpdate", [!!force]),
     applyUpdate: () => rpc("applyUpdate"),
     serviceStatus: async () => ({ supported: false, reason: NOT_AVAILABLE, installed: false, running: true, mode: "web" }),
     serviceInstall: async () => {
