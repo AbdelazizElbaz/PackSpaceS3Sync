@@ -240,7 +240,10 @@ async function login(serverUrl, logon, password, tenant = "") {
   try {
     res = await axios.post(
       `${base}/login`,
-      { logon, password },
+      // client=desktop : session propre à Sync (jeton 'desktop-app' côté
+      // API2) — ne déconnecte pas le même compte dans le B2B web, et une
+      // connexion au B2B ne déconnecte plus Sync (AuthController::store).
+      { logon, password, client: "desktop" },
       { headers: { Accept: "application/json", ...th }, timeout: 15000 }
     )
   } catch (err) {
