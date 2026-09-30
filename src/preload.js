@@ -50,7 +50,10 @@ contextBridge.exposeInMainWorld("agent", {
   serviceStart: () => ipcRenderer.invoke("service:start"),
 
   // Mise à jour de l'agent (voir selfUpdater.js)
-  checkUpdate: () => ipcRenderer.invoke("update:check"),
+  checkUpdate: (force = false) => ipcRenderer.invoke("update:check", !!force),
+  // Menu de l'icône → « Rechercher une mise à jour » : la fenêtre lance la
+  // recherche et affiche le résultat.
+  onManualUpdateCheck: (cb) => ipcRenderer.on("update:manualCheck", () => cb()),
   applyUpdate: () => ipcRenderer.invoke("update:apply"),
 
   // Pré-remplissage de la connexion (lien printios-sync:// depuis le navigateur)

@@ -140,13 +140,13 @@ class Engine {
   // asset=null si aucun installeur pour cette plateforme (ou aucune
   // release publiée). Ne throw jamais : un souci réseau => juste
   // "non disponible", pas d'erreur qui interromprait l'appelant.
-  async checkUpdate() {
+  async checkUpdate(force = false) {
     // Sans jeton aussi (écran de connexion) : l'endpoint de version est public.
     if (!store.get("serverUrl")) {
       return { available: false, current: api.APP_VERSION, reason: "no_server" }
     }
     try {
-      const rel = await api.fetchLatestRelease()
+      const rel = await api.fetchLatestRelease({ refresh: !!force })
       if (!rel?.available || !rel.version) {
         return { available: false, current: api.APP_VERSION, reason: "no_release", message: rel?.message || null }
       }

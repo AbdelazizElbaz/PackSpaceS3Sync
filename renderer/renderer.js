@@ -698,9 +698,9 @@ let updateInfo = null
 let dismissedUpdateVersion = null
 
 let lastUpdateCheckAt = 0
-async function refreshUpdateBanner() {
+async function refreshUpdateBanner(force = false) {
   try {
-    updateInfo = await window.agent.checkUpdate()
+    updateInfo = await window.agent.checkUpdate(force)
   } catch {
     updateInfo = null
   }
@@ -744,7 +744,10 @@ $("updateApplyBtn").addEventListener("click", async () => {
   }
 })
 
-setInterval(refreshUpdateBanner, 2 * 60 * 60 * 1000)
+// Nouvelle version affichée au plus vite : toutes les 10 min, et dès que la
+// fenêtre revient au premier plan (au plus une fois par minute).
+setInterval(() => refreshUpdateBanner(), 10 * 60 * 1000)
+window.addEventListener("focus", () => { if (Date.now() - lastUpdateCheckAt > 60 * 1000) refreshUpdateBanner() })
 // Tant qu'aucune vérification n'a abouti (pas connecté au démarrage,
 // réseau…), on réessaie toutes les 5 min plutôt que d'attendre 2 h.
 setInterval(() => {
@@ -775,12 +778,45 @@ function renderUpdateCheckStatus() {
   }[updateInfo.reason] || "à jour"
   el.textContent = `Version installée : ${cur} — ${why}.`
 }
+// Recherche MANUELLE (bouton de la barre du haut, menu de l'icône) : on
+// affiche toujours un résultat — nouvelle version (avec « Mettre à jour
+// maintenant ») ou « à jour » / raison, dans la bannière du haut.
+let manualCheckTimer = null
+async function manualUpdateCheck() {
+  const btn = $("topCheckUpdateBtn")
+  if (btn) { btn.disabled = true; btn.textContent = "Recherche…" }
+  clearTimeout(manualCheckTimer)
+  try {
+    dismissedUpdateVersion = null
+    await refreshUpdateBanner(true)
+    const banner = $("updateBanner")
+    if (updateInfo?.available) {
+      $("updateApplyBtn").classList.remove("hidden")
+      $("updateApplyBtn").disabled = false
+      $("updateApplyBtn").textContent = "Mettre à jour maintenant"
+      $("updateDismissBtn").classList.remove("hidden")
+      banner.classList.remove("hidden")
+    } else {
+      renderUpdateCheckStatus()
+      $("updateBannerText").textContent = $("updateCheckStatus")?.textContent || "Aucune mise à jour disponible."
+      $("updateApplyBtn").classList.add("hidden")
+      $("updateDismissBtn").classList.remove("hidden")
+      banner.classList.remove("hidden")
+      manualCheckTimer = setTimeout(() => { if (!updateInfo?.available) banner.classList.add("hidden") }, 8000)
+    }
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = "Rechercher une mise à jour" }
+  }
+}
+$("topCheckUpdateBtn")?.addEventListener("click", manualUpdateCheck)
+window.agent.onManualUpdateCheck?.(() => manualUpdateCheck())
+
 $("checkUpdateBtn")?.addEventListener("click", async () => {
   const btn = $("checkUpdateBtn")
   btn.disabled = true
   btn.textContent = "Vérification…"
   try {
-    await refreshUpdateBanner()
+    await refreshUpdateBanner(true)
   } finally {
     btn.disabled = false
     btn.textContent = "Vérifier maintenant"

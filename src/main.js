@@ -77,7 +77,8 @@ function buildTrayMenu() {
   if (!tray) return
   const items = [
     { label: "Ouvrir", click: () => createWindow() },
-    { label: "Vérifier maintenant", click: () => backend && backend.call("scanNow").catch(() => {}) },
+    { label: "Vérifier les dossiers maintenant", click: () => backend && backend.call("scanNow").catch(() => {}) },
+    { label: "Rechercher une mise à jour", click: () => manualUpdateCheckFromTray() },
   ]
   if (pendingUpdate?.available) {
     items.push({ type: "separator" })
@@ -115,7 +116,11 @@ function buildTray() {
 // (une seule fois par version), ajoute une entrée au menu tray et change
 // l'info-bulle. Un clic sur la notification ouvre la fenêtre sur la
 // bannière de mise à jour.
-const UPDATE_CHECK_MS = 2 * 60 * 60 * 1000
+// Toutes les 10 min (et à l'ouverture de la fenêtre) : une nouvelle version
+// publiée doit apparaître tout de suite — sur demande : « la mise à jour doit
+// s'afficher immédiatement ». Appel léger (manifeste en cache 60 s côté API,
+// limité par poste).
+const UPDATE_CHECK_MS = 10 * 60 * 1000
 let notifiedUpdateVersion = null
 
 async function checkForUpdateAndNotify() {
@@ -151,9 +156,20 @@ async function checkForUpdateAndNotify() {
   }
 }
 
+// Menu de l'icône → « Rechercher une mise à jour » : ouvre la fenêtre, qui
+// lance la recherche et affiche le résultat (nouvelle version ou « à jour »).
+function manualUpdateCheckFromTray() {
+  createWindow()
+  const send = () => { if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send("update:manualCheck") }
+  if (mainWindow && mainWindow.webContents.isLoading()) mainWindow.webContents.once("did-finish-load", send)
+  else send()
+  // Met aussi à jour le menu / l'info-bulle de l'icône.
+  checkForUpdateAndNotify()
+}
+
 function scheduleUpdateNotifications() {
-  // Premier contrôle 30 s après le démarrage (laisse le backend se connecter).
-  setTimeout(checkForUpdateAndNotify, 30 * 1000)
+  // Premier contrôle 5 s après le démarrage (laisse le backend se connecter).
+  setTimeout(checkForUpdateAndNotify, 5 * 1000)
   setInterval(checkForUpdateAndNotify, UPDATE_CHECK_MS)
 }
 
@@ -539,7 +555,7 @@ ipcMain.handle("sync:resume", wrap(() => backend.call("resume")))
 // c'est CE processus Electron qui se ferme juste après avoir lancé
 // l'assistant d'installation (voir selfUpdater.js). Le timeout est élevé :
 // le téléchargement de l'installeur peut prendre plus d'une minute.
-ipcMain.handle("update:check", wrap(() => backend.call("checkUpdate")))
+ipcMain.handle("update:check", wrap((_e, force = false) => backend.call("checkUpdate", [!!force], 30000)))
 ipcMain.handle("update:apply", wrap(() => backend.call("applyUpdate", [], 180000)))
 
 // ---------- mode service ----------

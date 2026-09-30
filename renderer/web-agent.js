@@ -118,7 +118,7 @@
     // silencieuse elle-même refuse proprement en conteneur (voir
     // selfUpdater.js isContainer()) : ici la mise à jour se fait en
     // changeant le tag d'image Docker, pas depuis cette page.
-    checkUpdate: () => rpc("checkUpdate"),
+    checkUpdate: (force = false) => rpc("checkUpdate", [!!force]),
     applyUpdate: () => rpc("applyUpdate"),
     serviceStatus: async () => ({ supported: false, reason: NOT_AVAILABLE, installed: false, running: true, mode: "web" }),
     serviceInstall: async () => {

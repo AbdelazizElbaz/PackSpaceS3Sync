@@ -570,7 +570,9 @@ async function deleteInstance(id) {
 // DesktopSyncController::releases()) — même endpoint que la carte de
 // téléchargement du B2B ; l'agent y a accès avec son propre jeton (rôle
 // admin/operator). { available, version, assets:[{os,arch,kind,name,size,url}] }
-async function fetchLatestRelease() {
+// refresh=true : recherche manuelle — l'API relit la dernière version
+// publiée sans attendre son cache (60 s).
+async function fetchLatestRelease({ refresh = false } = {}) {
   // Endpoint PUBLIC (GET /desktop/agent/release) : la mise à jour doit
   // fonctionner même déconnecté (écran de connexion, jeton expiré) — seule
   // l'adresse du serveur (et l'espace client) est nécessaire. Repli sur
@@ -578,6 +580,7 @@ async function fetchLatestRelease() {
   const base = normalizeServerUrl(store.get("serverUrl"))
   try {
     const res = await axios.get(`${base}/desktop/agent/release`, {
+      params: refresh ? { refresh: 1 } : undefined,
       // X-Agent-Id : limite de débit PAR POSTE côté API (et non par IP du magasin)
       headers: { Accept: "application/json", "X-Agent-Id": machineId(), "X-Agent-Host": HOSTNAME, ...tenantHeaders() },
       timeout: 15000,
