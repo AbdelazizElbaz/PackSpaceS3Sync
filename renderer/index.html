@@ -7,7 +7,14 @@
 </head>
 <body>
   <header class="topbar">
-    <span class="brand">PrintIOS Sync <span id="appVersion" class="app-version" title="Version installée"></span></span>
+    <!-- Logo PrintIOS (mêmes couleurs que la boutique et l'application) :
+         « Print » bleu, « I » + moitié gauche du « O » jaune, moitié droite
+         du « O » + « S » rouge. Pastille blanche pour rester lisible sur la
+         barre bleue. -->
+    <span class="brand">
+      <span class="brand-logo" aria-label="PrintIOS Sync"><span class="bl-print">Print</span><span class="bl-i">I</span><span class="bl-o">O</span><span class="bl-s">S</span><span class="bl-sync">Sync</span></span>
+      <span id="appVersion" class="app-version" title="Version installée"></span>
+    </span>
     <span class="topbar-right">
       <span id="modeBadge" class="mode-badge hidden" title="L'agent tourne comme service : il continue même session fermée">service</span>
       <span id="globalStatus" class="global-status"></span>
