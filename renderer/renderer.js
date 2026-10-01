@@ -557,6 +557,7 @@ $("autoLaunchToggle").addEventListener("change", (e) => window.agent.setAutoLaun
 // ---------- mode service ----------
 
 async function refreshServiceStatus() {
+  const box = $("serviceBox")
   const badge = $("serviceBadge")
   const info = $("serviceInfo")
   const installBtn = $("serviceInstallBtn")
@@ -565,16 +566,17 @@ async function refreshServiceStatus() {
   const startBtn = $("serviceStartBtn")
   try {
     const s = await window.agent.serviceStatus()
+    // "Installer le service" (et tout le bloc Mode service) n'a de sens
+    // qu'en mode agent desktop — masqué entièrement en mode web/conteneur
+    // (voir web-agent.js::serviceStatus(), qui renvoie supported:false),
+    // pas juste les boutons d'action. Sur demande explicite de
+    // l'utilisateur : "installer service doit s'afficher seulement si on
+    // est en mode agent".
     if (!s.supported) {
-      badge.textContent = "indisponible"
-      badge.className = "badge off"
-      info.textContent = s.reason || ""
-      installBtn.classList.add("hidden")
-      uninstallBtn.classList.add("hidden")
-      stopBtn.classList.add("hidden")
-      startBtn.classList.add("hidden")
+      box.classList.add("hidden")
       return
     }
+    box.classList.remove("hidden")
     if (!s.installed) {
       badge.textContent = "non installé"
       badge.className = "badge off"
