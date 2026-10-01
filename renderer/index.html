@@ -203,8 +203,11 @@
         <label class="switch"><input type="checkbox" id="autoLaunchToggle" /><span class="slider"></span></label>
       </div>
 
-      <!-- Mode service : l'agent continue même session fermée -->
-      <div class="service-box">
+      <!-- Mode service : l'agent continue même session fermée — tout le
+           bloc est masqué quand on n'est pas en mode agent desktop (ex.
+           mode web/conteneur, voir renderer.js::refreshServiceStatus()),
+           pas seulement les boutons d'action. -->
+      <div id="serviceBox" class="service-box">
         <div class="row" style="padding-top:0">
           <span>
             <strong>Mode service</strong>
