@@ -1,0 +1,4 @@
+﻿
+# graphify (evite d'invalider le cache de prompt)
+graphify-out/cache/
+graphify-out/*.json

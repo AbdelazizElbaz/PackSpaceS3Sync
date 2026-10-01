@@ -1,0 +1,21 @@
+﻿
+# graphify : dossiers volumineux sans valeur pour le graphe
+vendor/
+node_modules/
+.next/
+out/
+dist/
+build/
+coverage/
+storage/
+bootstrap/cache/
+*.sql
+*.sql.gz
+*.zip
+*.lock
+*.tsbuildinfo
+*.map
+*.min.js
+*.log
+~$*
+graphify-out/
