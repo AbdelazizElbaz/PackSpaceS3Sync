@@ -154,6 +154,8 @@
       </div>
       <label class="check"><input type="checkbox" id="instDeleteRemoved" /> Supprimer localement les fichiers retirés de la source S3</label>
       <p class="hint">Désactivé : un fichier supprimé dans S3 reste sur le poste. Activé : il est aussi supprimé du dossier local (uniquement les fichiers synchronisés par l'agent).</p>
+      <label class="check"><input type="checkbox" id="instSkipExisting" /> Ne pas télécharger les fichiers déjà présents, seulement les nouveaux</label>
+      <p class="hint">Désactivé : tout le contenu déjà présent dans ce dossier S3 est téléchargé. Activé : seuls les fichiers déposés APRÈS la création de cette instance seront synchronisés — n'a d'effet qu'au tout premier scan.</p>
       <p id="instError" class="error"></p>
       <div class="modal-actions">
         <button id="instCancelBtn" class="small ghost">Annuler</button>

@@ -76,6 +76,7 @@ class SyncManager {
       localDir: i.localDir,
       enabled: i.enabled !== false,
       deleteRemoved: i.deleteRemoved === true,
+      skipExisting: i.skipExisting === true,
     }))
     const known = new Set(list.map((i) => i.id))
     // Instances supprimées côté serveur : on abandonne leurs jobs en cours.
@@ -130,7 +131,7 @@ class SyncManager {
 
   // ---------- instances (écritures → serveur, puis rechargement) ----------
 
-  async addInstance({ name, prefix, localDir, deleteRemoved = false }) {
+  async addInstance({ name, prefix, localDir, deleteRemoved = false, skipExisting = false }) {
     const agentId = store.get("agentId")
     if (!agentId) throw new Error("Agent non enregistré auprès du serveur.")
     await api.createInstance(agentId, {
@@ -139,6 +140,10 @@ class SyncManager {
       localDir,
       enabled: true,
       deleteRemoved: !!deleteRemoved,
+      // Sur demande explicite de l'utilisateur : "ne pas synchroniser les
+      // fichiers existants, seulement les nouveaux" — voir scanInstance()
+      // plus bas, qui seed le manifeste au lieu de télécharger au premier scan.
+      skipExisting: !!skipExisting,
     })
     await this.refreshConfig()
     this.scanNow()
@@ -460,6 +465,24 @@ class SyncManager {
     try {
       const objects = await api.listAllObjects(inst.prefix)
       const manifest = this.manifest(inst.id)
+
+      // Option "skipExisting" (voir instSkipExisting / addInstance()) : au
+      // TOUT PREMIER scan de cette instance (manifeste encore vide), on
+      // marque directement tout le contenu S3 déjà présent comme "déjà
+      // synchronisé" SANS le télécharger — seuls les fichiers déposés APRÈS
+      // ce moment seront mis en file lors des scans suivants. Le manifeste
+      // n'étant plus vide ensuite, ce bloc ne s'exécute bien qu'une fois.
+      // Sur demande explicite de l'utilisateur : "ne pas synchroniser les
+      // fichiers existants, seulement les nouveaux".
+      if (inst.skipExisting && Object.keys(manifest).length === 0 && objects.length > 0) {
+        for (const o of objects) {
+          this.markSynced(inst.id, o.key, { size: o.size, etag: o.etag })
+        }
+        this.instanceStats.set(inst.id, { ...stats, lastScanAt: Date.now(), lastError: null, total: objects.length, synced: objects.length })
+        this.emit()
+        return
+      }
+
       let synced = 0
       for (const o of objects) {
         const known = manifest[o.key]

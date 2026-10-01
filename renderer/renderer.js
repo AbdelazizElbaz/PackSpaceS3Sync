@@ -494,6 +494,7 @@ $("createInstanceBtn").addEventListener("click", () => {
   $("instName").value = currentPrefix.split("/").filter(Boolean).slice(-2).join(" / ")
   $("instLocalDir").value = ""
   $("instDeleteRemoved").checked = false
+  $("instSkipExisting").checked = false
   $("instError").textContent = ""
   $("instanceDialog").classList.remove("hidden")
 })
@@ -515,7 +516,13 @@ $("instSaveBtn").addEventListener("click", async () => {
     return
   }
   try {
-    await window.agent.addInstance({ name, prefix, localDir, deleteRemoved: $("instDeleteRemoved").checked })
+    await window.agent.addInstance({
+      name,
+      prefix,
+      localDir,
+      deleteRemoved: $("instDeleteRemoved").checked,
+      skipExisting: $("instSkipExisting").checked,
+    })
     $("instanceDialog").classList.add("hidden")
   } catch (e) {
     $("instError").textContent = errMsg(e, "Impossible de créer l'instance.")
