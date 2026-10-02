@@ -16,6 +16,7 @@ contextBridge.exposeInMainWorld("agent", {
   pickUploadFile: (opts) => ipcRenderer.invoke("upload:pickFile", opts || {}),
   getOrder: (orderId) => ipcRenderer.invoke("upload:getOrder", orderId),
   listOrders: (opts) => ipcRenderer.invoke("upload:listOrders", opts || {}),
+  listVendors: () => ipcRenderer.invoke("upload:listVendors"),
   openItemFile: (s3Key, displayName) => ipcRenderer.invoke("upload:openFile", s3Key, displayName || null),
   // File d'envoi (plusieurs fichiers en même temps, arrière-plan)
   enqueueUpload: (payload) => ipcRenderer.invoke("upload:enqueue", payload),

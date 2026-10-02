@@ -96,6 +96,7 @@
     pickUploadFile: async () => { window.alert("L'envoi de fichiers n'est disponible que dans l'application de bureau."); return null },
     getOrder: (orderId) => rpc("getOrder", [orderId]),
     listOrders: (opts) => rpc("listUnshippedOrders", [opts || {}]),
+    listVendors: () => rpc("listVendors", []),
     openItemFile: async (s3Key, displayName) => { const url = await rpc("fileUrl", [s3Key, displayName || null]); window.open(url, "_blank"); return true },
     enqueueUpload: (payload) => rpc("uploadItemFile", [payload]),
     uploadQueue: async () => [],

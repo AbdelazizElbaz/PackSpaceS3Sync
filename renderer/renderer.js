@@ -333,6 +333,11 @@ async function refreshConfig() {
     $("syncBody").classList.toggle("hidden", !canSync)
     $("uploadPanel").classList.toggle("hidden", !canUpload)
     $("ordersPane").classList.toggle("hidden", !canUpload)
+    // Filtre par vendeur — admin/opérateur uniquement (un vendeur ne voit
+    // déjà que ses propres commandes, voir listUnshippedOrders() côté api.js).
+    const canFilterByVendeur = canUpload && ["admin", "operator"].includes(c.role)
+    $("ordersVendeurRow").classList.toggle("hidden", !canFilterByVendeur)
+    if (canFilterByVendeur) loadVendeurOptions()
     if (canUpload) loadOrdersList()
     $("autoLaunchToggle").checked = !!c.autoLaunch
     $("autoUpdateToggle").checked = Number(c.autoUpdate) === 1
@@ -960,6 +965,26 @@ async function startUpload(itemId, kind) {
   }
 }
 
+// Liste des vendeurs pour le filtre ci-dessus (admin/opérateur uniquement)
+// — chargée une fois par session, pas à chaque rafraîchissement.
+let vendeurOptionsLoaded = false
+async function loadVendeurOptions() {
+  if (vendeurOptionsLoaded) return
+  vendeurOptionsLoaded = true
+  try {
+    const vendors = await window.agent.listVendors()
+    const select = $("ordersVendeurFilter")
+    for (const v of vendors) {
+      const opt = document.createElement("option")
+      opt.value = String(v.id)
+      opt.textContent = v.name
+      select.appendChild(opt)
+    }
+  } catch {
+    vendeurOptionsLoaded = false // retentera au prochain refreshConfig()
+  }
+}
+
 // Liste des commandes PAS ENCORE EXPÉDIÉES (colonne gauche, mode utilisateur) :
 // un clic charge la commande dans le panneau de droite. Rafraîchie toutes les 60 s.
 let ordersSearchTimer = null
@@ -968,7 +993,10 @@ async function loadOrdersList() {
   const err = $("ordersError")
   err.textContent = ""
   try {
-    const list = await window.agent.listOrders({ search: $("ordersSearch").value.trim() })
+    const list = await window.agent.listOrders({
+      search: $("ordersSearch").value.trim(),
+      resellerUserId: $("ordersVendeurFilter").value || undefined,
+    })
     if (!list.length) { box.innerHTML = `<p class="empty">Aucune commande à expédier.</p>`; return }
     box.innerHTML = list.map((o) => `<div class="browse-row order-row ${uploadOrder && Number(uploadOrder.id) === Number(o.id) ? "active" : ""}" data-order="${o.id}">
         <div class="order-row-main"><strong>#${o.id}</strong> ${o.customer ? `· ${o.customer}` : ""}${o.reseller ? ` <span class="hint">· ${o.reseller}</span>` : ""}</div>
@@ -985,6 +1013,7 @@ async function loadOrdersList() {
 }
 $("refreshOrdersBtn").addEventListener("click", loadOrdersList)
 $("ordersSearch").addEventListener("input", () => { clearTimeout(ordersSearchTimer); ordersSearchTimer = setTimeout(loadOrdersList, 400) })
+$("ordersVendeurFilter").addEventListener("change", loadOrdersList)
 setInterval(() => { if (!$("ordersPane").classList.contains("hidden")) loadOrdersList() }, 60 * 1000)
 
 $("uploadLoadBtn").addEventListener("click", loadUploadOrder)

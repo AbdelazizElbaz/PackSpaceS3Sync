@@ -77,6 +77,12 @@
       <div class="dir-row" style="padding:6px 10px">
         <input id="ordersSearch" type="text" placeholder="N° ou client…" />
       </div>
+      <!-- Filtre par vendeur — admin/opérateur uniquement, voir refreshConfig() -->
+      <div class="dir-row hidden" id="ordersVendeurRow" style="padding:0 10px 6px">
+        <select id="ordersVendeurFilter">
+          <option value="">Tous les vendeurs</option>
+        </select>
+      </div>
       <div id="ordersError" class="error"></div>
       <div id="ordersList" class="browse-list"><p class="empty">Chargement…</p></div>
     </aside>

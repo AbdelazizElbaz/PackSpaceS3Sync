@@ -324,11 +324,18 @@ async function getOrder(orderId) {
 // Commandes PAS ENCORE EXPÉDIÉES de l'utilisateur (mode utilisateur) —
 // GET /orders/unshipped, même endpoint que l'onglet « À expédier » du B2B.
 // Vendeur / revendeur : limité à son revendeur (reseller_user_id, comme le
-// front) ; admin / opérateur : toutes. `search` = n° commande / client.
-async function listUnshippedOrders({ search = "", limit = 100 } = {}) {
+// front) ; admin / opérateur : toutes, avec filtre optionnel par vendeur
+// (resellerUserId, voir listVendors() ci-dessous — admin/opérateur
+// uniquement, ignoré pour un vendeur qui ne doit voir que ses propres
+// commandes). `search` = n° commande / client.
+async function listUnshippedOrders({ search = "", limit = 100, resellerUserId } = {}) {
   const role = store.get("role") || ""
   const params = { search: search || undefined }
-  if (["vendeur", "reseller"].includes(role) && store.get("userId")) params.reseller_user_id = store.get("userId")
+  if (["vendeur", "reseller"].includes(role) && store.get("userId")) {
+    params.reseller_user_id = store.get("userId")
+  } else if (["admin", "operator"].includes(role) && resellerUserId) {
+    params.reseller_user_id = resellerUserId
+  }
   const res = await client().get("/orders/unshipped", { params })
   const list = Array.isArray(res.data) ? res.data : (res.data?.data || [])
   return list.slice(0, limit).map((o) => ({
@@ -341,6 +348,18 @@ async function listUnshippedOrders({ search = "", limit = 100 } = {}) {
     total: o.total_order,
     has_shipping: !!o.has_shipping,
   }))
+}
+
+// Liste des vendeurs (revendeurs internes) — GET /vendors, même endpoint que
+// la page "Mon équipe" du B2B — pour le filtre "par vendeur" de la liste de
+// commandes ci-dessus (admin/opérateur uniquement, voir listUnshippedOrders()).
+async function listVendors() {
+  const res = await client().get("/vendors")
+  const list = Array.isArray(res.data) ? res.data : (res.data?.data || [])
+  return list.map((v) => ({
+    id: v.user?.id,
+    name: `${v.user?.first_name || ""} ${v.user?.last_name || ""}`.trim() || v.user?.logon || `#${v.id}`,
+  })).filter((v) => v.id)
 }
 
 // URL présignée (15 min) pour OUVRIR un fichier d'article dans le navigateur
@@ -615,6 +634,7 @@ module.exports = {
   login,
   getOrder,
   listUnshippedOrders,
+  listVendors,
   fileUrl,
   uploadItemFile,
   declareLocalCopy,
