@@ -86,6 +86,14 @@ class SyncManager {
         this.items.delete(k)
       }
     }
+    // « Nouveaux fichiers seulement » désactivé : on oublie la ligne de base, pour qu'une
+    // réactivation ultérieure reparte de l'état du moment.
+    const baselined = new Set(store.get("skipBaselined") || [])
+    let baselineChanged = false
+    for (const i of list) {
+      if (!i.skipExisting && baselined.delete(i.id)) baselineChanged = true
+    }
+    if (baselineChanged) store.set("skipBaselined", [...baselined])
     store.set("instances", list)
     this.configVersion = Number(cfg.config_version || 0)
     this.emit()
@@ -466,21 +474,27 @@ class SyncManager {
       const objects = await api.listAllObjects(inst.prefix)
       const manifest = this.manifest(inst.id)
 
-      // Option "skipExisting" (voir instSkipExisting / addInstance()) : au
-      // TOUT PREMIER scan de cette instance (manifeste encore vide), on
-      // marque directement tout le contenu S3 déjà présent comme "déjà
-      // synchronisé" SANS le télécharger — seuls les fichiers déposés APRÈS
-      // ce moment seront mis en file lors des scans suivants. Le manifeste
-      // n'étant plus vide ensuite, ce bloc ne s'exécute bien qu'une fois.
-      // Sur demande explicite de l'utilisateur : "ne pas synchroniser les
-      // fichiers existants, seulement les nouveaux".
-      if (inst.skipExisting && Object.keys(manifest).length === 0 && objects.length > 0) {
-        for (const o of objects) {
-          this.markSynced(inst.id, o.key, { size: o.size, etag: o.etag })
+      // Option "skipExisting" (« nouveaux fichiers seulement », voir instSkipExisting /
+      // addInstance() et le réglage de l'instance dans le B2B) : au premier scan APRÈS
+      // l'activation (à la création, ou plus tard sur une instance existante), tout le
+      // contenu S3 déjà présent est marqué "déjà synchronisé" SANS être téléchargé — seuls
+      // les fichiers déposés ensuite seront mis en file. Les fichiers déjà connus du
+      // manifeste ne sont pas touchés. La ligne de base est mémorisée (skipBaselined) :
+      // ce bloc ne s'exécute qu'une fois par activation.
+      if (inst.skipExisting) {
+        const baselined = new Set(store.get("skipBaselined") || [])
+        if (!baselined.has(inst.id)) {
+          if (objects.length > 0) {
+            for (const o of objects) {
+              if (!manifest[o.key]) this.markSynced(inst.id, o.key, { size: o.size, etag: o.etag })
+            }
+            this.instanceStats.set(inst.id, { ...stats, lastScanAt: Date.now(), lastError: null, total: objects.length, synced: objects.length })
+          }
+          baselined.add(inst.id)
+          store.set("skipBaselined", [...baselined])
+          this.emit()
+          return
         }
-        this.instanceStats.set(inst.id, { ...stats, lastScanAt: Date.now(), lastError: null, total: objects.length, synced: objects.length })
-        this.emit()
-        return
       }
 
       let synced = 0
